@@ -265,15 +265,19 @@ body {
 .tile--mini  { width: 14px; height: 20px; font-size: 10px; }
 .tile--river { width: 18px; height: 24px; font-size: 13px; }
 
-/* sprite sheet 用 (将来 sprite.png を置けば 自動で 切替) */
+/* sprite sheet 用 (assets/tiles.png 10列×4行) */
 .tile--sprite {
   background-image: url('assets/tiles.png');
-  background-size: 800% 400%;  /* 8列×4行 = 32セル (28 + 4余白) */
+  background-size: 1000% 400%;  /* 10列×4行 */
   background-repeat: no-repeat;
-  font-size: 0;  /* テキストは隠す */
+  font-size: 0;
   color: transparent;
+  /* background-color を消し、 元のグラデを上書き */
+  background-color: transparent;
+  border: none;
+  box-shadow: none;
 }
-/* 各牌IDに background-position を 設定する class は JS で動的に */
+/* 牌のサイズはそのまま .tile クラスのサイズを継承 */
 
 /* アクションバー */
 .action-bar {
