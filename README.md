@@ -4,8 +4,7 @@
 
 ## URL
 
-- **本番** (main): https://omoroi-sanma.pages.dev/ (Cloudflare Pages 連携後に有効化)
-- **dev preview** (dev): https://dev.omoroi-sanma.pages.dev/
+- **本番** (main): https://omoroi-sanma.pages.dev/ — Cloudflare Pages 自動デプロイ
 
 ## 仕様サマリ
 
@@ -34,10 +33,10 @@
 
 ## 開発
 
-### ブランチ運用 (Prismaera 流)
-- 通常作業は `dev` ブランチで commit/push → `dev.omoroi-sanma.pages.dev` に即反映
-- 野沢さんレビューOKを得た後 → `git checkout main && git merge dev --ff-only && git push`
-- バージョン: dev は `vX.Y.Zsuffix` (a/b/c)、 main はクリーン番号
+### ブランチ運用 (main 直接運用)
+- 身内向けアプリのため Prismaera のような dev/main 分離はせず、 **main に直接 commit/push** で即反映 (野沢さん指示 2026-05-08)
+- バージョン: シンプルに `vX.Y.Z` インクリメント
+- Phase 2 で 多人数公開化 する時に dev/main 分離を 再検討
 
 ### ローカル確認
 ブラウザで `index.html` を直接開く (静的HTML/JS のみ、 ビルド不要)。
