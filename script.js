@@ -154,32 +154,33 @@ function renderRiver(p) {
 // ─── 描画: 山 (各家前に 2段積み + 次ツモ位置矢印) ──
 function renderWall() {
   const remain = G.drawWall.length;
-  // 自分の前を 一番多めに → 視認性 (自分が次にツモるのが一番手前で見える)
-  // 単純化: 残り山を 3等分
   const perSeat = Math.ceil(remain / 3);
 
   ['p0', 'p1', 'p2'].forEach((p, i) => {
     const container = document.getElementById(WALL_DOM_ID[p]);
     if (!container) return;
+    // 古いラベルを 全て削除してから 描画 (累積バグ対策)
+    const wrap = container.parentElement;
+    if (wrap) wrap.querySelectorAll('.seat__wall-label').forEach(el => el.remove());
     container.innerHTML = '';
+
     const start = i * perSeat;
     const end = Math.min(start + perSeat, remain);
     for (let k = start; k < end; k++) {
       const t = document.createElement('div');
       t.className = 'wall-tile';
-      // 次にツモる先頭1枚 (drawWall の先頭) を ハイライト
       if (k === 0) {
         t.classList.add('wall-tile--next');
         t.title = '次にここからツモります';
       }
       container.appendChild(t);
     }
-    // 自分の山に「↓ 次のツモ」 ラベルを差し込む
-    if (p === 'p0' && remain > 0) {
+    // 自分の山に「↓ 次のツモ」 ラベル を 1個だけ
+    if (p === 'p0' && remain > 0 && wrap) {
       const label = document.createElement('div');
       label.className = 'seat__wall-label seat__wall-label--top';
       label.textContent = '↓ 次のツモ';
-      container.parentElement.insertBefore(label, container);
+      wrap.insertBefore(label, container);
     }
   });
 }
