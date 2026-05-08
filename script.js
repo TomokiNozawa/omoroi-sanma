@@ -84,65 +84,34 @@ function sortHand(hand) {
   return [...hand].sort((a, b) => (a.id !== b.id) ? a.id - b.id : a.copy - b.copy);
 }
 
-// ─── 牌IDから sprite (col, row) へのマップ ─────
-// 画像レイアウト: 10列×4行
-// 行0: 東/南/西/北/白/發/中/黄裏/青裏/緑裏
-// 行1: 萬子 1m,2m,3m,4m,5m赤,5m,6m,7m,8m,9m
-// 行2: 索子 1s,2s,3s,4s,5s赤,5s,6s,7s,8s,9s
-// 行3: 筒子 1p,2p,3p,4p,5p赤,5p,6p,7p,8p,9p
-const TILE_SPRITE_POS = {
-   0: [0, 1],  // 1m
-   1: [9, 1],  // 9m
-   2: [0, 3],  // 1p
-   3: [1, 3],  // 2p
-   4: [2, 3],  // 3p
-   5: [3, 3],  // 4p
-   6: [4, 3],  // 5p (赤ドラ)
-   7: [6, 3],  // 6p
-   8: [7, 3],  // 7p
-   9: [8, 3],  // 8p
-  10: [9, 3],  // 9p
-  11: [0, 2],  // 1s
-  12: [1, 2],  // 2s
-  13: [2, 2],  // 3s
-  14: [3, 2],  // 4s
-  15: [4, 2],  // 5s (赤ドラ)
-  16: [6, 2],  // 6s
-  17: [7, 2],  // 7s
-  18: [8, 2],  // 8s
-  19: [9, 2],  // 9s
-  20: [0, 0],  // 東
-  21: [1, 0],  // 南
-  22: [2, 0],  // 西
-  23: [3, 0],  // 北
-  24: [4, 0],  // 白
-  25: [5, 0],  // 發
-  26: [6, 0],  // 中
+// ─── 牌IDから 画像ファイル名 ────────────────────
+const TILE_IMG = {
+   0: '1m.png',
+   1: '9m.png',
+   2: '1p.png', 3: '2p.png', 4: '3p.png', 5: '4p.png', 6: '5p.png',
+   7: '6p.png', 8: '7p.png', 9: '8p.png', 10: '9p.png',
+  11: '1s.png', 12: '2s.png', 13: '3s.png', 14: '4s.png', 15: '5s.png',
+  16: '6s.png', 17: '7s.png', 18: '8s.png', 19: '9s.png',
+  20: '東.png', 21: '南.png', 22: '西.png', 23: '北.png',
+  24: '白.png', 25: '発.png', 26: '中.png',
 };
-const TILE_BACK_POS = [9, 0];  // 緑裏面 (10列目)
-
-function setSpritePos(el, col, row) {
-  // background-position % = col/(cols-1) × 100%, row/(rows-1) × 100%
-  const x = (col / 9) * 100;  // 10列なので分母=9
-  const y = (row / 3) * 100;  // 4行なので分母=3
-  el.style.backgroundPosition = `${x}% ${y}%`;
-}
+const TILE_BACK_IMG = '背面_緑.png';
 
 // ─── DOM 生成 ───────────────────────────────────
 function createTileEl(tile, opts = {}) {
   const el = document.createElement('div');
-  el.className = 'tile tile--sprite';
+  el.className = 'tile tile--img';
   if (opts.small) el.classList.add('tile--small');
   if (opts.mini)  el.classList.add('tile--mini');
   if (opts.river) el.classList.add('tile--river');
   if (opts.mine)  el.classList.add('tile--mine');
   if (opts.justDrawn) el.classList.add('tile--just-drawn');
   if (opts.back) {
-    setSpritePos(el, TILE_BACK_POS[0], TILE_BACK_POS[1]);
+    el.style.backgroundImage = `url('assets/${encodeURIComponent(TILE_BACK_IMG)}')`;
     el.title = '伏せ牌';
   } else {
-    const pos = TILE_SPRITE_POS[tile.id];
-    if (pos) setSpritePos(el, pos[0], pos[1]);
+    const fn = TILE_IMG[tile.id];
+    if (fn) el.style.backgroundImage = `url('assets/${encodeURIComponent(fn)}')`;
     el.title = TILE_NAMES[tile.id] + (tile.isRed ? ' (赤ドラ)' : '');
   }
   if (tile) {

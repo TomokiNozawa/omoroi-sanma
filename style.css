@@ -237,7 +237,7 @@ body {
 /* ─ 牌 (画像 sprite ベース、 アスペクト 1:1.44) ─ */
 .tile {
   display: inline-block;
-  width: 24px; height: 35px;  /* 1:1.44 (画像セル比 62×90) */
+  width: 24px; height: 32px;  /* 1:1.33 (画像 69×93 比 1:1.35 に近似) */
   border-radius: 3px;
   transition: transform 0.1s;
   flex-shrink: 0;
@@ -248,23 +248,20 @@ body {
 .tile--mine.tile--selected { transform: translateY(-8px); box-shadow: 0 4px 8px rgba(76,175,80,0.8); }
 .tile--mine.tile--just-drawn { box-shadow: 0 0 6px rgba(255,152,0,0.8); }
 
-.tile--small { width: 18px; height: 26px; }
-.tile--mini  { width: 14px; height: 20px; }
-.tile--river { width: 18px; height: 26px; }
+.tile--small { width: 18px; height: 24px; }
+.tile--mini  { width: 14px; height: 19px; }
+.tile--river { width: 18px; height: 24px; }
 
-/* sprite sheet 用 (assets/tiles.png 10列×4行) */
-.tile--sprite {
-  background-image: url('assets/tiles.png');
-  background-size: 1000% 400%;  /* 10列×4行 */
+/* 個別画像 牌 (assets/{1m.png, 1p.png, ...}) */
+.tile--img {
+  background-size: 100% 100%;
   background-repeat: no-repeat;
-  font-size: 0;
-  color: transparent;
-  /* background-color を消し、 元のグラデを上書き */
   background-color: transparent;
   border: none;
   box-shadow: none;
+  font-size: 0;
+  color: transparent;
 }
-/* 牌のサイズはそのまま .tile クラスのサイズを継承 */
 
 /* アクションバー */
 .action-bar {
@@ -366,10 +363,10 @@ body {
 
 /* ── PC 横画面 (640px〜) ────────────── */
 @media (min-width: 640px) {
-  .tile { width: 28px; height: 40px; }  /* 1:1.43 */
-  .tile--small { width: 22px; height: 32px; }
-  .tile--mini  { width: 16px; height: 23px; }
-  .tile--river { width: 22px; height: 32px; }
+  .tile { width: 28px; height: 38px; }  /* 1:1.36 */
+  .tile--small { width: 22px; height: 30px; }
+  .tile--mini  { width: 16px; height: 22px; }
+  .tile--river { width: 22px; height: 30px; }
   .lobby { max-width: 600px; }
   .game__header { font-size: 13px; }
   .wall-tile { width: 16px; height: 22px; }
