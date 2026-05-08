@@ -88,40 +88,47 @@ function buildWalls(allTiles) {
 // ─── サイコロを振って カット位置 + 王牌 + 自摸山を決定 ──
 function applyDice(walls, diceTotal) {
   // 起点家 = (diceTotal - 1) % 4
-  // bottom=1,5,9 / right=2,6,10 / top=3,7,11 / left=4,8,12
   const startSeat = ALL_SEATS[(diceTotal - 1) % 4];
   const ccw = ccwFrom(startSeat);
   const startWall = walls[startSeat];
   // カット位置 = 起点家山の右端から diceTotal 牌引いた位置 (= 27 - diceTotal)
   const cutPosInStart = startWall.length - diceTotal;
 
-  // 王牌 14牌 (起点家山の カット位置以降、 隣にまたがる場合あり)
-  let kingTiles, drawTiles;
+  // 王牌 14牌 (カット位置から右へ、 起点家山に入りきらない場合 隣にまたがる)
+  let kingTiles;
   if (diceTotal >= 14) {
-    // 起点家山に 14牌入りきる
     kingTiles = startWall.slice(cutPosInStart, cutPosInStart + 14);
-    // 自摸山: 起点家のカット位置左 + 起点家の王牌後 + 反時計回り次の3家全部
-    drawTiles = [
-      ...startWall.slice(0, cutPosInStart),
-      ...startWall.slice(cutPosInStart + 14),
-      ...walls[ccw[1]], ...walls[ccw[2]], ...walls[ccw[3]],
-    ];
   } else {
-    // 王牌が 起点家山に入りきらない、 隣の家の山先頭から 補充
     const overflow = 14 - diceTotal;
     kingTiles = [
       ...startWall.slice(cutPosInStart),
       ...walls[ccw[1]].slice(0, overflow),
     ];
+  }
+
+  // 自摸山 = ツモる順 (カット位置のすぐ左から左方向、 そして 反時計回り次家の右端から左方向、 …)
+  // つまり 各家の山を reverse して 連結すれば、 drawTiles.shift() で 正しい順にツモれる
+  let drawTiles;
+  if (diceTotal >= 14) {
     drawTiles = [
-      ...startWall.slice(0, cutPosInStart),
-      ...walls[ccw[1]].slice(overflow),
-      ...walls[ccw[2]], ...walls[ccw[3]],
+      ...startWall.slice(0, cutPosInStart).slice().reverse(),  // 起点家 自摸山 右→左
+      ...walls[ccw[1]].slice().reverse(),                       // 次家 27牌 右→左
+      ...walls[ccw[2]].slice().reverse(),
+      ...walls[ccw[3]].slice().reverse(),
+    ];
+  } else {
+    // 王牌が次家にまたがる: 次家の overflow 以降が 自摸山
+    const overflow = 14 - diceTotal;
+    drawTiles = [
+      ...startWall.slice(0, cutPosInStart).slice().reverse(),
+      ...walls[ccw[1]].slice(overflow).slice().reverse(),
+      ...walls[ccw[2]].slice().reverse(),
+      ...walls[ccw[3]].slice().reverse(),
     ];
   }
 
-  // ドラ表示 = 王牌の 右から3枚目
-  const doraIndicator = kingTiles[kingTiles.length - 3];
+  // ドラ表示 = カット位置から右に 3枚目 (= 王牌の左から3枚目 = サイコロで数えた位置から+2)
+  const doraIndicator = kingTiles[2];
 
   return { startSeat, cutPosInStart, kingTiles, drawTiles, doraIndicator };
 }
@@ -247,9 +254,15 @@ function renderWalls() {
     remaining -= consumed[ccw[i]];
   }
 
-  // ドラ表示位置 (起点家山にあるか 隣家にあるか)
-  const doraIdxInStart = (G.diceTotal >= 14) ? G.cutPosInStart + 11 : -1;
-  const doraIdxInNext = (G.diceTotal < 14 && G.diceTotal > 0) ? (11 - G.diceTotal) : -1;
+  // ドラ表示位置 (カット位置から右に3枚目 = 王牌の左から3枚目)
+  // - 王牌が起点家に入りきる場合: 起点家山の cutPosInStart + 2
+  // - 王牌が隣家にまたがる場合 (diceTotal < 3): 隣家山の 2 - diceTotal の位置
+  const doraIdxInStart = (G.diceTotal > 0 && G.diceTotal >= 3 - 0) ? G.cutPosInStart + 2 : -1;
+  // diceTotal が 1 or 2 の場合のみ ドラが隣家に行くが、 サイコロ目=2-12 なので 常に diceTotal >= 2
+  // 安全のため: cutPosInStart + 2 が 起点家山の長さ (27) 未満なら 起点家、 越えたら 隣家
+  const doraInStart = (G.cutPosInStart + 2) < 27;
+  const doraIdxInStartFinal = doraInStart ? (G.cutPosInStart + 2) : -1;
+  const doraIdxInNext = !doraInStart ? ((G.cutPosInStart + 2) - 27) : -1;
 
   ALL_SEATS.forEach(seat => {
     const container = document.getElementById(`wall-${seat}`);
@@ -273,11 +286,11 @@ function renderWalls() {
         // 消費済 = 空セル (透明 or 詰めない)
         t.style.visibility = 'hidden';
       }
-      // ドラ表示
+      // ドラ表示 (カット位置 + 2 = 王牌の左から3枚目)
       let isDora = false;
-      if (seat === G.startSeat && visIdx === doraIdxInStart && G.doraIndicator) {
+      if (seat === G.startSeat && visIdx === doraIdxInStartFinal && G.doraIndicator) {
         isDora = true;
-      } else if (G.diceTotal < 14 && seat === ccw[1] && visIdx === doraIdxInNext && G.doraIndicator) {
+      } else if (seat === ccw[1] && visIdx === doraIdxInNext && doraIdxInNext >= 0 && G.doraIndicator) {
         isDora = true;
       }
       if (isDora) {
