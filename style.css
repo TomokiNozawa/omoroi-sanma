@@ -1,4 +1,5 @@
-/* おもろい三麻 — Phase 1 MVP v0.2.0 */
+/* おもろい三麻 — Phase 1 MVP v0.3.3
+   雀卓レイアウト: 中央box固定 + 各家を absolute で 中央box の四方に配置 */
 *, *::before, *::after { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; height: 100%; }
 body {
@@ -54,29 +55,7 @@ body {
   position: fixed;
   inset: 0;
   display: grid;
-  grid-template-rows: 36px 28px 1fr 56px;
-}
-
-.game__hint {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(76, 175, 80, 0.15);
-  color: #4caf50;
-  font-size: 12px;
-  padding: 4px 12px;
-  border-bottom: 1px solid rgba(76, 175, 80, 0.3);
-  text-align: center;
-  font-weight: 500;
-  transition: background 0.2s, color 0.2s;
-}
-.game__hint--cpu {
-  background: rgba(255, 152, 0, 0.15);
-  color: #ff9800;
-}
-.game__hint--idle {
-  background: rgba(170, 170, 200, 0.1);
-  color: #aac;
+  grid-template-rows: 32px 24px 1fr 50px;
 }
 
 .game__header {
@@ -84,80 +63,113 @@ body {
   align-items: center;
   padding: 0 8px;
   background: rgba(0,0,0,0.3);
-  font-size: 12px;
-  gap: 8px;
+  font-size: 11px;
+  gap: 6px;
 }
-.game__back {
-  color: #fff;
-  text-decoration: none;
-  font-size: 18px;
-  padding: 0 8px;
-}
+.game__back { color: #fff; text-decoration: none; font-size: 16px; padding: 0 6px; }
 .game__round { font-weight: bold; }
-.game__turn { color: #4caf50; font-weight: bold; }
-.game__remain { margin-left: auto; color: #aac; }
+.game__turn { color: #4caf50; font-weight: bold; font-size: 11px; }
+.game__remain { margin-left: auto; color: #aac; font-size: 11px; }
 .game__guide-btn {
-  background: none;
-  border: 1px solid #4a6;
-  color: #4a6;
-  padding: 4px 8px;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 13px;
+  background: none; border: 1px solid #4a6; color: #4a6;
+  padding: 2px 6px; border-radius: 4px; cursor: pointer; font-size: 12px;
 }
 
-/* 円卓 (table) — 各家の山が 中央を囲む 雀卓風 */
+.game__hint {
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(76, 175, 80, 0.15);
+  color: #4caf50;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-bottom: 1px solid rgba(76, 175, 80, 0.3);
+  text-align: center;
+  font-weight: 500;
+  transition: background 0.2s, color 0.2s;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.game__hint--cpu { background: rgba(255, 152, 0, 0.15); color: #ff9800; }
+.game__hint--idle { background: rgba(170, 170, 200, 0.1); color: #aac; }
+
+/* ── 卓 (table) ── 中央box固定 + 各家 absolute ── */
 .table {
   position: relative;
   background: radial-gradient(ellipse at center, #1a5530 0%, #0d3b1f 70%, #0a2818 100%);
-  display: grid;
-  grid-template-areas:
-    ".    top    ."
-    "left center right"
-    ".    bottom .";
-  grid-template-rows: auto auto auto;
-  grid-template-columns: auto auto auto;
-  align-items: center;
-  justify-items: center;
-  align-content: center;
-  justify-content: center;
-  padding: 4px;
-  gap: 2px;
-}
-
-.seat { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 2px; }
-.seat--top    { grid-area: top;    align-self: end; }
-.seat--right  { grid-area: right;  flex-direction: column; justify-self: start; }
-.seat--bottom { grid-area: bottom; align-self: start; }
-.seat--left   { grid-area: left;   flex-direction: column; }
-
-.seat__label { font-size: 10px; color: #aac; }
-.seat__hand {
-  display: flex;
-  flex-wrap: nowrap;
-  gap: 1px;
-  justify-content: center;
   overflow: hidden;
 }
-.seat__hand--mine { flex-wrap: wrap; }
-.seat__river {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 1px;
-  max-width: 100%;
-  padding: 2px;
-  min-height: 22px;
-  justify-content: center;
+
+/* 中央: 王牌 + 場情報 (固定サイズ box、 卓の中央) */
+.center {
+  position: absolute;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  width: 180px;
+  background: rgba(0,0,0,0.5);
+  border: 1px solid #2d6b3f;
+  border-radius: 6px;
+  padding: 6px 8px;
+  text-align: center;
+  z-index: 2;
+}
+.center__king-label { font-size: 9px; color: #aac; }
+.center__king-tiles {
+  display: flex; flex-wrap: wrap; gap: 1px;
+  justify-content: center; margin: 3px 0;
+}
+.center__round-info {
+  font-size: 11px; color: #4caf50; font-weight: bold;
+  margin-top: 4px; padding-top: 4px;
+  border-top: 1px solid rgba(45,107,63,0.4);
+}
+.center__round-info #center-remain { color: #ffeb3b; font-size: 14px; }
+
+/* 各家を 中央box の四方に absolute 配置 */
+.seat { position: absolute; display: flex; flex-direction: column; align-items: center; gap: 2px; }
+
+.seat--top {
+  top: 4px; left: 50%;
+  transform: translateX(-50%);
+  flex-direction: column;  /* hand → label → wall → river の順 (中央寄り に進む) */
+}
+.seat--bottom {
+  bottom: 4px; left: 50%;
+  transform: translateX(-50%);
+  flex-direction: column-reverse;  /* hand が下、 中央寄りに wall → river */
+}
+.seat--right {
+  right: 4px; top: 50%;
+  transform: translateY(-50%);
+  flex-direction: row-reverse;  /* hand が右、 中央寄りに wall → river */
+  align-items: center;
 }
 
-/* 山 (壁牌) — 雀卓風: 卓全体を 3面で囲む 連続体 */
+.seat__label { font-size: 9px; color: #aac; line-height: 1.2; }
+.seat__hand {
+  display: flex; flex-wrap: nowrap; gap: 1px; justify-content: center;
+}
+.seat__hand--mine { flex-wrap: wrap; max-width: 96vw; }
+
+/* 河 — 中央寄り、 各家から見て自分側に倒れた向き */
+.seat__river {
+  display: grid;
+  grid-template-columns: repeat(6, auto);
+  gap: 1px;
+  padding: 2px;
+  min-height: 22px;
+  min-width: 22px;
+  max-width: 200px;
+}
+.seat--top .seat__river .tile { transform: rotate(180deg); }
+.seat--right .seat__river .tile { transform: rotate(90deg); }
+
+/* 山 — 雀卓風 (各家前に 17×2段、 中央box の縁に密接) */
 .seat__wall-wrap {
   position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 2px;
-  margin: 2px 0;
 }
 .seat--right .seat__wall-wrap { flex-direction: row; }
 
@@ -166,266 +178,42 @@ body {
   grid-template-rows: auto auto;
   grid-auto-flow: column;
   gap: 1px;
-  padding: 3px 5px;
-  background: linear-gradient(180deg, rgba(20,40,25,0.9) 0%, rgba(10,20,12,0.9) 100%);
+  padding: 2px 4px;
+  background: linear-gradient(180deg, rgba(20,40,25,0.95) 0%, rgba(10,20,12,0.95) 100%);
   border-radius: 3px;
   border: 1px solid #2d6b3f;
   box-shadow: inset 0 1px 0 rgba(255,255,255,0.08), 0 1px 3px rgba(0,0,0,0.5);
 }
-/* 下家 (画面右): 牌を縦向きで 2列 */
 .seat__wall--right {
   grid-template-rows: none;
   grid-template-columns: auto auto;
   grid-auto-flow: row;
 }
+
+/* 山牌 — スマホ縦に収まるサイズ */
 .wall-tile {
-  width: 18px;
-  height: 24px;
+  width: 12px;
+  height: 16px;
   background: linear-gradient(180deg, #0e6e3e 0%, #094a28 100%);
   border: 1px solid #052010;
   border-radius: 2px;
   flex-shrink: 0;
-  box-shadow: 0 1px 2px rgba(0,0,0,0.5);
+  box-shadow: 0 1px 1px rgba(0,0,0,0.5);
 }
-.seat__wall--right .wall-tile {
-  width: 24px;
-  height: 18px;
-}
+.seat__wall--right .wall-tile { width: 16px; height: 12px; }
 .wall-tile--next {
   background: linear-gradient(180deg, #ffeb3b 0%, #fbc02d 100%);
   border-color: #f57f17;
-  box-shadow: 0 0 8px #ffeb3b, 0 1px 2px rgba(0,0,0,0.5);
+  box-shadow: 0 0 6px #ffeb3b, 0 1px 1px rgba(0,0,0,0.5);
   animation: pulse 1.2s infinite;
-  position: relative;
 }
 @keyframes pulse {
-  0%, 100% { box-shadow: 0 0 8px #ffeb3b, 0 1px 2px rgba(0,0,0,0.5); }
-  50% { box-shadow: 0 0 18px #ffeb3b, 0 1px 2px rgba(0,0,0,0.5); }
+  0%, 100% { box-shadow: 0 0 6px #ffeb3b, 0 1px 1px rgba(0,0,0,0.5); }
+  50%      { box-shadow: 0 0 14px #ffeb3b, 0 1px 1px rgba(0,0,0,0.5); }
 }
-.seat__wall-label {
-  font-size: 10px;
-  color: #ffeb3b;
-  font-weight: bold;
-  text-shadow: 0 0 4px rgba(0,0,0,0.8);
-  pointer-events: none;
-}
-.seat__wall-label--top    { order: -1; }
-.seat__wall-label--bottom { order: 99; }
-
-/* 牌 */
-.tile {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 36px;
-  background: linear-gradient(180deg, #fff 0%, #f0e8d8 100%);
-  border: 1px solid #8b6f47;
-  border-radius: 4px;
-  font-size: 20px;
-  color: #222;
-  font-weight: 500;
-  box-shadow: 0 1px 2px rgba(0,0,0,0.4), inset 0 -2px 0 #c9b896;
-  cursor: default;
-  transition: transform 0.1s;
-  flex-shrink: 0;
-}
-.tile--mine { cursor: pointer; }
-.tile--mine:hover { transform: translateY(-3px); }
-.tile--mine.tile--selected { transform: translateY(-8px); border-color: #4caf50; box-shadow: 0 4px 8px rgba(76,175,80,0.6); }
-.tile--mine.tile--just-drawn { border-color: #ff9800; box-shadow: 0 0 8px rgba(255,152,0,0.6); }
-.tile--back {
-  background: linear-gradient(180deg, #0e6e3e 0%, #0a4a2a 100%);
-  color: transparent;
-  border-color: #052010;
-}
-.tile--red { color: #d32f2f; background: linear-gradient(180deg, #ffe0e0 0%, #ffc0c0 100%); }
-.tile--small { width: 20px; height: 28px; font-size: 14px; }
-.tile--mini  { width: 16px; height: 22px; font-size: 12px; }
-.tile--river { width: 22px; height: 30px; font-size: 16px; }
-
-/* 中央 (王牌+ドラ) */
-.center {
-  grid-area: center;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  padding: 8px;
-}
-.center__king {
-  background: rgba(0,0,0,0.3);
-  padding: 6px 10px;
-  border-radius: 8px;
-  text-align: center;
-  border: 1px dashed #888;
-}
-.center__king-label { font-size: 10px; color: #aac; margin-bottom: 4px; }
-.center__king-tiles { display: flex; flex-wrap: wrap; gap: 1px; justify-content: center; max-width: 200px; }
-.center__round-info {
-  font-size: 13px;
-  color: #4caf50;
-  font-weight: bold;
-  background: rgba(0,0,0,0.4);
-  padding: 4px 12px;
-  border-radius: 16px;
-}
-.center__round-info #center-remain { color: #ffeb3b; font-size: 16px; }
-
-/* アクションバー */
-.action-bar {
-  display: flex;
-  gap: 6px;
-  padding: 8px 10px;
-  background: rgba(0,0,0,0.5);
-  align-items: center;
-  justify-content: space-around;
-}
-.action-btn {
-  flex: 1;
-  padding: 10px 4px;
-  border: 1px solid #4a6;
-  background: #143820;
-  color: #fff;
-  border-radius: 8px;
-  font-size: 13px;
-  cursor: pointer;
-}
-.action-btn:disabled { opacity: 0.3; cursor: not-allowed; }
-.action-btn--primary { background: #d32f2f; border-color: #f44336; }
-.action-btn:not(:disabled):active { transform: scale(0.95); }
-
-/* オンボーディング */
-.guide-overlay {
-  position: fixed; inset: 0;
-  background: rgba(0,0,0,0.7);
-  display: flex; align-items: center; justify-content: center;
-  z-index: 100;
-}
-.guide-overlay[hidden] { display: none; }
-.guide-modal {
-  background: #143820;
-  border: 2px solid #4caf50;
-  border-radius: 12px;
-  padding: 20px;
-  max-width: 320px;
-  width: 90%;
-}
-.guide-modal__title { margin: 0 0 12px; font-size: 18px; color: #4caf50; }
-.guide-modal__text { font-size: 14px; line-height: 1.6; color: #ddd; }
-.guide-modal__nav { display: flex; align-items: center; gap: 8px; margin-top: 16px; }
-.guide-modal__step { font-size: 12px; color: #aac; }
-.guide-modal__skip { background: none; border: none; color: #aac; cursor: pointer; margin-left: auto; }
-.guide-modal__next {
-  background: #4caf50; color: #fff; border: none;
-  padding: 8px 16px; border-radius: 6px; cursor: pointer; font-weight: bold;
-}
-
-/* サイコロ セレモニー — 卓を覆わない floating パネル */
-.dice-overlay {
-  position: fixed;
-  top: 70px;       /* header(36) + hint(28) を避けて */
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 110;
-  pointer-events: none;  /* 卓のクリックを通す、 modal自身は auto */
-}
-.dice-overlay[hidden] { display: none; }
-.dice-modal {
-  background: rgba(20, 56, 32, 0.97);
-  border: 2px solid #ffeb3b;
-  border-radius: 14px;
-  padding: 14px 18px;
-  max-width: 360px;
-  width: 92vw;
-  text-align: center;
-  box-shadow: 0 4px 20px rgba(0,0,0,0.6), 0 0 20px rgba(255,235,59,0.2);
-  pointer-events: auto;
-  backdrop-filter: blur(4px);
-}
-.dice-modal__title { margin: 0 0 8px; font-size: 15px; color: #ffeb3b; }
-.dice-row {
-  display: flex; align-items: center; justify-content: center;
-  gap: 6px; margin: 8px 0;
-}
-.dice {
-  font-size: 36px;
-  width: 48px; height: 48px;
-  background: #fff;
-  color: #222;
-  border-radius: 8px;
-  display: flex; align-items: center; justify-content: center;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.5);
-}
-.dice--rolling {
-  animation: dice-roll 0.15s infinite;
-}
-@keyframes dice-roll {
-  0%   { transform: rotate(0deg)   scale(1); }
-  25%  { transform: rotate(90deg)  scale(1.1); }
-  50%  { transform: rotate(180deg) scale(1); }
-  75%  { transform: rotate(270deg) scale(1.1); }
-  100% { transform: rotate(360deg) scale(1); }
-}
-.dice-plus, .dice-equals { font-size: 20px; color: #ffeb3b; font-weight: bold; }
-.dice-total {
-  font-size: 36px;
-  color: #ffeb3b;
-  font-weight: bold;
-  min-width: 56px;
-}
-.dice-explain {
-  font-size: 12px; color: #ddd; line-height: 1.5;
-  margin: 6px 0;
-}
-.dice-counter {
-  background: rgba(255,235,59,0.15);
-  padding: 6px 8px;
-  border-radius: 8px;
-  margin: 6px 0;
-}
-.dice-counter__label { font-size: 11px; color: #aac; margin-right: 8px; }
-.dice-counter__num {
-  font-size: 22px; color: #ffeb3b; font-weight: bold;
-  display: inline-block;
-  min-width: 36px;
-}
-.dice-mnemonic {
-  background: rgba(255,235,59,0.08);
-  border: 1px solid rgba(255,235,59,0.3);
-  padding: 6px 10px;
-  border-radius: 8px;
-  margin: 6px 0;
-  text-align: left;
-  font-size: 11px;
-  line-height: 1.5;
-  color: #ddd;
-}
-.dice-mnemonic[hidden] { display: none; }
-.dice-mnemonic__title {
-  font-size: 12px;
-  color: #ffeb3b;
-  margin: 0 0 4px;
-  font-weight: bold;
-  text-align: center;
-}
-.dice-mnemonic__line { margin: 2px 0; color: #f0f0f0; font-size: 11px; }
-.dice-mnemonic__line b { color: #ffeb3b; font-weight: bold; }
-
-.dice-ok {
-  background: #4caf50; color: #fff; border: none;
-  padding: 8px 20px; border-radius: 8px;
-  font-weight: bold; font-size: 13px; cursor: pointer;
-  margin-top: 6px;
-}
-.dice-ok[hidden] { display: none; }
-
-/* 山の カット位置ハイライト (王牌の境界) */
 .wall-tile--cut-line {
   background: linear-gradient(180deg, #f44336 0%, #b71c1c 100%);
   border-color: #ff8a80;
-  box-shadow: 0 0 8px #f44336;
 }
 .wall-tile--king {
   background: linear-gradient(180deg, #9c27b0 0%, #6a1b9a 100%);
@@ -437,79 +225,165 @@ body {
   animation: count-flash 0.3s;
 }
 @keyframes count-flash {
-  0% { transform: scale(1.4); box-shadow: 0 0 15px #2196f3; }
-  100% { transform: scale(1); box-shadow: 0 0 4px #2196f3; }
+  0% { transform: scale(1.4); box-shadow: 0 0 12px #2196f3; }
+  100% { transform: scale(1); box-shadow: none; }
+}
+.seat__wall-label {
+  font-size: 9px; color: #ffeb3b; font-weight: bold;
+  text-shadow: 0 0 4px rgba(0,0,0,0.8);
+  pointer-events: none;
 }
 
-/* 河の向き (雀卓風 — 各家から見て自分側に倒れる) */
-.seat--top .seat__river .tile { transform: rotate(180deg); }
-.seat--right .seat__river .tile { transform: rotate(90deg); }
-/* 自家はそのまま */
+/* ─ 牌 (sprite sheet 受入れ準備、 現状は Unicode fallback) ─ */
+.tile {
+  display: inline-flex;
+  align-items: center; justify-content: center;
+  width: 24px; height: 32px;
+  background: linear-gradient(180deg, #fff 0%, #f0e8d8 100%);
+  border: 1px solid #8b6f47;
+  border-radius: 3px;
+  font-size: 16px;
+  color: #222; font-weight: 500;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.4), inset 0 -2px 0 #c9b896;
+  transition: transform 0.1s;
+  flex-shrink: 0;
+  position: relative;
+}
+.tile--mine { cursor: pointer; }
+.tile--mine:hover { transform: translateY(-3px); }
+.tile--mine.tile--selected { transform: translateY(-8px); border-color: #4caf50; box-shadow: 0 4px 8px rgba(76,175,80,0.6); }
+.tile--mine.tile--just-drawn { border-color: #ff9800; box-shadow: 0 0 6px rgba(255,152,0,0.6); }
+.tile--back {
+  background: linear-gradient(180deg, #0e6e3e 0%, #0a4a2a 100%);
+  color: transparent; border-color: #052010;
+}
+.tile--red {
+  color: #d32f2f;
+  background: linear-gradient(180deg, #ffe5e5 0%, #ffc8c8 100%);
+}
+.tile--small { width: 18px; height: 24px; font-size: 12px; }
+.tile--mini  { width: 14px; height: 20px; font-size: 10px; }
+.tile--river { width: 18px; height: 24px; font-size: 13px; }
+
+/* sprite sheet 用 (将来 sprite.png を置けば 自動で 切替) */
+.tile--sprite {
+  background-image: url('assets/tiles.png');
+  background-size: 800% 400%;  /* 8列×4行 = 32セル (28 + 4余白) */
+  background-repeat: no-repeat;
+  font-size: 0;  /* テキストは隠す */
+  color: transparent;
+}
+/* 各牌IDに background-position を 設定する class は JS で動的に */
+
+/* アクションバー */
+.action-bar {
+  display: flex; gap: 4px; padding: 6px 8px;
+  background: rgba(0,0,0,0.55);
+  align-items: center; justify-content: space-around;
+}
+.action-btn {
+  flex: 1; padding: 8px 4px;
+  border: 1px solid #4a6; background: #143820; color: #fff;
+  border-radius: 6px; font-size: 12px; cursor: pointer;
+}
+.action-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+.action-btn--primary { background: #d32f2f; border-color: #f44336; }
+.action-btn:not(:disabled):active { transform: scale(0.95); }
+
+/* オンボーディング */
+.guide-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; z-index: 100; }
+.guide-overlay[hidden] { display: none; }
+.guide-modal { background: #143820; border: 2px solid #4caf50; border-radius: 12px; padding: 18px; max-width: 320px; width: 90%; }
+.guide-modal__title { margin: 0 0 10px; font-size: 16px; color: #4caf50; }
+.guide-modal__text { font-size: 13px; line-height: 1.55; color: #ddd; }
+.guide-modal__nav { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
+.guide-modal__step { font-size: 11px; color: #aac; }
+.guide-modal__skip { background: none; border: none; color: #aac; cursor: pointer; margin-left: auto; font-size: 12px; }
+.guide-modal__next { background: #4caf50; color: #fff; border: none; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-weight: bold; font-size: 13px; }
+
+/* サイコロ (上部 floating、 卓を覆わない) */
+.dice-overlay {
+  position: fixed;
+  top: 60px; left: 50%;
+  transform: translateX(-50%);
+  z-index: 110;
+  pointer-events: none;
+}
+.dice-overlay[hidden] { display: none; }
+.dice-modal {
+  background: rgba(20, 56, 32, 0.97);
+  border: 2px solid #ffeb3b;
+  border-radius: 12px;
+  padding: 12px 14px;
+  max-width: 320px;
+  width: 92vw;
+  text-align: center;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.6), 0 0 16px rgba(255,235,59,0.2);
+  pointer-events: auto;
+  backdrop-filter: blur(4px);
+}
+.dice-modal__title { margin: 0 0 6px; font-size: 14px; color: #ffeb3b; }
+.dice-row { display: flex; align-items: center; justify-content: center; gap: 5px; margin: 6px 0; }
+.dice {
+  font-size: 30px; width: 40px; height: 40px;
+  background: #fff; color: #222;
+  border-radius: 6px;
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.5);
+}
+.dice--rolling { animation: dice-roll 0.15s infinite; }
+@keyframes dice-roll {
+  0%   { transform: rotate(0deg)   scale(1); }
+  50%  { transform: rotate(180deg) scale(1.1); }
+  100% { transform: rotate(360deg) scale(1); }
+}
+.dice-plus, .dice-equals { font-size: 16px; color: #ffeb3b; font-weight: bold; }
+.dice-total { font-size: 30px; color: #ffeb3b; font-weight: bold; min-width: 44px; }
+.dice-explain { font-size: 11px; color: #ddd; line-height: 1.4; margin: 4px 0; }
+.dice-counter { background: rgba(255,235,59,0.15); padding: 4px 8px; border-radius: 6px; margin: 4px 0; }
+.dice-counter__label { font-size: 10px; color: #aac; margin-right: 6px; }
+.dice-counter__num { font-size: 18px; color: #ffeb3b; font-weight: bold; min-width: 30px; display: inline-block; }
+.dice-mnemonic { background: rgba(255,235,59,0.08); border: 1px solid rgba(255,235,59,0.3); padding: 4px 8px; border-radius: 6px; margin: 4px 0; text-align: left; font-size: 10px; line-height: 1.4; color: #ddd; }
+.dice-mnemonic[hidden] { display: none; }
+.dice-mnemonic__title { font-size: 11px; color: #ffeb3b; margin: 0 0 2px; font-weight: bold; text-align: center; }
+.dice-mnemonic__line { margin: 1px 0; color: #f0f0f0; font-size: 10px; }
+.dice-mnemonic__line b { color: #ffeb3b; font-weight: bold; }
+.dice-ok { background: #4caf50; color: #fff; border: none; padding: 6px 16px; border-radius: 6px; font-weight: bold; font-size: 12px; cursor: pointer; margin-top: 4px; }
+.dice-ok[hidden] { display: none; }
 
 /* トースト */
 .toast {
-  position: fixed;
-  top: 50px;
-  left: 50%;
+  position: fixed; top: 70px; left: 50%;
   transform: translateX(-50%);
-  background: rgba(0,0,0,0.85);
-  color: #fff;
-  padding: 10px 20px;
-  border-radius: 20px;
-  font-size: 14px;
-  z-index: 50;
+  background: rgba(0,0,0,0.85); color: #fff;
+  padding: 8px 16px; border-radius: 16px;
+  font-size: 12px; z-index: 50;
   animation: toast-in 0.2s;
 }
 .toast[hidden] { display: none; }
 @keyframes toast-in { from { opacity: 0; transform: translate(-50%, -10px); } to { opacity: 1; transform: translate(-50%, 0); } }
 
 /* 局終了モーダル */
-.end-overlay {
-  position: fixed; inset: 0;
-  background: rgba(0,0,0,0.8);
-  display: flex; align-items: center; justify-content: center;
-  z-index: 100;
-}
+.end-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 100; }
 .end-overlay[hidden] { display: none; }
-.end-modal {
-  background: #143820;
-  border: 2px solid #ff9800;
-  border-radius: 12px;
-  padding: 24px;
-  max-width: 360px;
-  width: 90%;
-  text-align: center;
-}
-.end-modal__title { margin: 0 0 12px; font-size: 22px; color: #ff9800; }
-.end-modal__text { font-size: 14px; line-height: 1.6; color: #ddd; }
-.end-modal__nav { display: flex; gap: 8px; margin-top: 16px; }
-.end-modal__btn {
-  flex: 1;
-  background: #4caf50; color: #fff; border: none;
-  padding: 12px; border-radius: 8px; cursor: pointer; font-weight: bold;
-  text-decoration: none; text-align: center;
-}
+.end-modal { background: #143820; border: 2px solid #ff9800; border-radius: 12px; padding: 20px; max-width: 360px; width: 90%; text-align: center; }
+.end-modal__title { margin: 0 0 10px; font-size: 20px; color: #ff9800; }
+.end-modal__text { font-size: 13px; line-height: 1.5; color: #ddd; }
+.end-modal__nav { display: flex; gap: 8px; margin-top: 14px; }
+.end-modal__btn { flex: 1; background: #4caf50; color: #fff; border: none; padding: 10px; border-radius: 6px; cursor: pointer; font-weight: bold; text-decoration: none; text-align: center; }
 .end-modal__btn--secondary { background: #555; }
 
 /* ── PC 横画面 (640px〜) ────────────── */
 @media (min-width: 640px) {
-  .tile { width: 30px; height: 42px; font-size: 24px; }
-  .tile--small { width: 24px; height: 32px; font-size: 16px; }
+  .tile { width: 28px; height: 38px; font-size: 22px; }
+  .tile--small { width: 22px; height: 30px; font-size: 14px; }
   .tile--mini  { width: 18px; height: 24px; font-size: 12px; }
-  .tile--river { width: 26px; height: 36px; font-size: 20px; }
+  .tile--river { width: 22px; height: 30px; font-size: 16px; }
   .lobby { max-width: 600px; }
-  .game__header { font-size: 14px; }
-  .wall-tile { width: 22px; height: 30px; }
-  .seat__wall--right .wall-tile { width: 30px; height: 22px; }
-}
-
-/* ── スマホ横向き ────────────────── */
-@media (max-height: 500px) and (orientation: landscape) {
-  .game { grid-template-rows: 30px 24px 1fr 50px; }
-  .tile { width: 22px; height: 32px; font-size: 16px; }
-  .tile--small { width: 18px; height: 26px; font-size: 12px; }
-  .tile--mini  { width: 14px; height: 20px; font-size: 10px; }
-  .seat__river { padding: 1px; }
-  .wall-tile { width: 14px; height: 20px; }
-  .seat__wall--right .wall-tile { width: 20px; height: 14px; }
+  .game__header { font-size: 13px; }
+  .wall-tile { width: 16px; height: 22px; }
+  .seat__wall--right .wall-tile { width: 22px; height: 16px; }
+  .center { width: 220px; padding: 8px 10px; }
+  .center__king-label, .seat__label { font-size: 11px; }
+  .center__round-info { font-size: 13px; }
 }
