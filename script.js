@@ -17,7 +17,8 @@ const TILE_UNICODE = [
 const RED_DORA_IDS = new Set([6, 15]); // 5p, 5s 全枚 (計8枚)
 const KITA_ID = 23; // 北
 const SEATS = ['p0', 'p1', 'p2'];
-const SEAT_LABELS = { p0: 'あなた', p1: 'CPU上家', p2: 'CPU下家' };
+// 三麻なので 自家+上家+下家 (対面は四麻のみ)。 CPU は名前付き
+const SEAT_LABELS = { p0: 'あなた (親)', p1: '上家 (CPU花子)', p2: '下家 (CPU太郎)' };
 const HAND_DOM_ID = { p0: 'hand-bottom', p1: 'hand-top', p2: 'hand-right' };
 const RIVER_DOM_ID = { p0: 'river-bottom', p1: 'river-top', p2: 'river-right' };
 const WALL_DOM_ID = { p0: 'wall-bottom', p1: 'wall-top', p2: 'wall-right' };
@@ -200,7 +201,10 @@ function renderKingWall() {
 function renderHeader() {
   document.getElementById('game-round').textContent = `${G.round}局 ${G.honba}本場`;
   document.getElementById('center-round').textContent = G.round;
-  document.getElementById('game-remain').textContent = `山残: ${G.drawWall.length}`;
+  const remain = G.drawWall.length;
+  document.getElementById('game-remain').textContent = `山残: ${remain}`;
+  const cr = document.getElementById('center-remain');
+  if (cr) cr.textContent = remain;
   document.getElementById('game-turn').textContent = G.turn === 'p0' ? 'あなたの番' : `${SEAT_LABELS[G.turn]} の番`;
 }
 
@@ -449,12 +453,12 @@ function toast(text) {
 
 // ─── オンボーディング ──────────────────────────
 const GUIDE_STEPS = [
-  { title: '配牌完了!', text: '手牌13牌+ツモ1牌が配られました (親なので)。 画面下が「あなた」、 上=「CPU上家」、 右=「CPU下家」 です。' },
-  { title: '🟡 山と次のツモ位置', text: '各家の前に山が積まれています。 黄色く光る牌が「次にツモる位置」 です。 ツモは山の左から順に取られます。' },
+  { title: '配牌完了!', text: '手牌13牌が配られました。 画面下=「あなた (親)」、 上=「上家 (CPU花子)」、 右=「下家 (CPU太郎)」 の3人で打ちます。 三麻なので 対面はいません。' },
+  { title: '🟡 卓全体で1つの山', text: '各家の前に山が3面積まれていますが、 これは 卓全体で1つの山 です。 黄色く光る牌が「次にツモる位置」、 自家の左端から ツモが進みます。' },
   { title: '🀫 王牌とドラ表示', text: '中央の点線枠が王牌14枚。 1枚だけ表向きの牌が「ドラ表示」 で、 その次の牌が「ドラ」 (1翻 加算)。' },
   { title: '🀃 北抜き', text: '北 (🀃) を引いたら 「北抜き」 ボタンで抜けます。 抜くたび 1翻、 嶺上 (王牌の末尾) から補充自摸 (関西ルール)。' },
   { title: '✨ 全部赤ドラ', text: '5筒×4枚 + 5索×4枚 = 計8枚 全部赤ドラ。 引いただけで 1翻ずつ加算 = 高翻数で気持ちよく勝てる仕様。' },
-  { title: 'はじめよう!', text: '牌をタップ → 「打牌」 ボタンで捨てます。 次は CPU上家 → CPU下家 → あなた の順。 3・3・3・3・2 を作るのが目的!' }
+  { title: 'はじめよう!', text: '牌をタップ → 「打牌」 ボタンで捨てます。 ターンは あなた → 下家 → 上家 → あなた … と反時計回り。 3・3・3・3・2 を作るのが目的!' }
 ];
 let guideIdx = 0;
 

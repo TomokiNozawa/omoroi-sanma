@@ -146,25 +146,29 @@ body {
   justify-content: center;
 }
 
-/* 山 (壁牌) — 2段積みで実物雀荘風 */
+/* 山 (壁牌) — 雀卓風: 卓全体を 3面で囲む 連続体 */
 .seat__wall-wrap {
   position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 2px;
-  margin: 4px 0;
+  margin: 2px 0;
 }
+.seat--right .seat__wall-wrap { flex-direction: row; }
+
 .seat__wall {
   display: grid;
   grid-template-rows: auto auto;
   grid-auto-flow: column;
   gap: 1px;
-  padding: 4px 6px;
-  background: rgba(0,0,0,0.25);
-  border-radius: 4px;
-  border: 1px solid rgba(255,255,255,0.1);
+  padding: 3px 5px;
+  background: linear-gradient(180deg, rgba(20,40,25,0.9) 0%, rgba(10,20,12,0.9) 100%);
+  border-radius: 3px;
+  border: 1px solid #2d6b3f;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.08), 0 1px 3px rgba(0,0,0,0.5);
 }
+/* 下家 (画面右): 牌を縦向きで 2列 */
 .seat__wall--right {
   grid-template-rows: none;
   grid-template-columns: auto auto;
@@ -255,7 +259,15 @@ body {
 }
 .center__king-label { font-size: 10px; color: #aac; margin-bottom: 4px; }
 .center__king-tiles { display: flex; flex-wrap: wrap; gap: 1px; justify-content: center; max-width: 200px; }
-.center__round-info { font-size: 14px; color: #4caf50; font-weight: bold; }
+.center__round-info {
+  font-size: 13px;
+  color: #4caf50;
+  font-weight: bold;
+  background: rgba(0,0,0,0.4);
+  padding: 4px 12px;
+  border-radius: 16px;
+}
+.center__round-info #center-remain { color: #ffeb3b; font-size: 16px; }
 
 /* アクションバー */
 .action-bar {
