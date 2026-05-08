@@ -466,8 +466,9 @@ function calcYaku(hand, context) {
   if (isHonitsu(hand)) { yakuList.push({ name: '混一色', han: 3 }); han += 3; }
   if (isChinitsu(hand)) { yakuList.push({ name: '清一色', han: 6 }); han += 6; }
 
-  // 立直・門前清自摸
+  // 立直・一発・門前清自摸
   if (context.isRiichi) { yakuList.push({ name: '立直', han: 1 }); han += 1; }
+  if (context.isIppatsu) { yakuList.push({ name: '一発', han: 1 }); han += 1; }
   if (context.isTsumo) { yakuList.push({ name: '門前清自摸和', han: 1 }); han += 1; }
 
   // ドラ計算 (表ドラ + 赤ドラ + 北ドラ)
@@ -764,19 +765,23 @@ function canDeclareRiichi(hand14) {
   return false;
 }
 
-// ─── ロン判定 (他家打牌時に 自家があがれるか) ──
-function checkRonForBottom(fromSeat, tile) {
-  // 自家がリーチ未でも振り込みなら ロン可、 ただし役なしロンは禁止
-  if (G.hands.bottom.length !== 13) return false;
-  const test = [...G.hands.bottom, tile];
-  if (!isWinning(test)) return false;
+// ─── ロン判定 (任意の家、 fromSeat の打牌に対して) ──
+function checkRonForSeat(seat, fromSeat, tile) {
+  if (seat === G.emptySeat || seat === fromSeat) return null;
+  if (G.hands[seat].length !== 13) return null;
+  const test = [...G.hands[seat], tile];
+  if (!isWinning(test)) return null;
   const ctx = {
-    isTsumo: false, isRiichi: G.isRiichi.bottom, isOya: G.oya === 'bottom',
-    doraIndicator: G.doraIndicator, kitas: G.kitas.bottom, round: G.round,
+    isTsumo: false, isRiichi: G.isRiichi[seat], isOya: G.oya === seat,
+    doraIndicator: G.doraIndicator, kitas: G.kitas[seat], round: G.round,
+    isIppatsu: G.riichiTurnsLeft[seat] > 0,
   };
   const result = calcYaku(test, ctx);
-  if (result.han === 0 && !result.isYakuman) return false;
-  return true;
+  if (result.han === 0 && !result.isYakuman) return null;
+  return { result, ctx };
+}
+function checkRonForBottom(fromSeat, tile) {
+  return checkRonForSeat('bottom', fromSeat, tile) !== null;
 }
 
 function onMyHandClick(tile) {
@@ -810,12 +815,26 @@ function discardTile(seat, tile) {
   for (const p of ALL_SEATS) {
     if (G.riichiTurnsLeft[p] > 0) G.riichiTurnsLeft[p]--;
   }
-  // 他家の打牌で 自家があがれるか チェック (ロン判定)
-  if (seat !== 'bottom') {
-    if (checkRonForBottom(seat, tile)) {
-      G.pendingRon = { fromSeat: seat, tile };
-      G.busy = true;
-      toast(`ロン可! 「ロン」 ボタンで あがれます`);
+  // 全家のロン判定 (反時計回り順で 一番先の家が優先、 簡略は順次見て 最初に見つかった家)
+  const ccw = ccwFrom(seat);
+  for (let i = 1; i < 4; i++) {
+    const checkSeat = ccw[i];
+    if (checkSeat === G.emptySeat) continue;
+    const ronCheck = checkRonForSeat(checkSeat, seat, tile);
+    if (ronCheck) {
+      if (checkSeat === 'bottom') {
+        // 自家ロン: ボタン待ち
+        G.pendingRon = { fromSeat: seat, tile };
+        G.busy = true;
+        toast(`ロン可! 「ロン」 ボタンで あがれます`);
+      } else {
+        // CPU ロン: 自動宣言
+        const test = [...G.hands[checkSeat], tile];
+        toast(`${SEAT_LABEL_BASE[checkSeat]} ロン! (${TILE_NAMES[tile.id]})`);
+        G.busy = true;
+        setTimeout(() => showWinModal(checkSeat, test, ronCheck.ctx, ronCheck.result), 600);
+      }
+      return true;
     }
   }
   return true;
@@ -863,6 +882,16 @@ function startTurn() {
 function cpuPlay(seat) {
   drawTile(seat);
   renderHand(seat);
+  // CPU リーチ判定 (14牌時、 未リーチ、 1000点以上、 テンパイ、 70%確率)
+  if (G.hands[seat].length === 14 && !G.isRiichi[seat]
+      && G.scores[seat] >= 1000 && canDeclareRiichi(G.hands[seat])) {
+    if (Math.random() > 0.3) {
+      G.isRiichi[seat] = true;
+      G.riichiTurnsLeft[seat] = 4;
+      G.scores[seat] -= 1000;
+      toast(`${SEAT_LABEL_BASE[seat]} リーチ! (-1000点)`);
+    }
+  }
   const kitaIdx = G.hands[seat].findIndex(t => t.id === KITA_ID);
   if (kitaIdx >= 0 && Math.random() > 0.1) {
     setTimeout(() => {
@@ -881,6 +910,7 @@ function cpuDiscard(seat) {
     const ctx = {
       isTsumo: true, isRiichi: G.isRiichi[seat], isOya: G.oya === seat,
       doraIndicator: G.doraIndicator, kitas: G.kitas[seat], round: G.round,
+      isIppatsu: G.riichiTurnsLeft[seat] > 0,
     };
     const result = calcYaku(G.hands[seat], ctx);
     if (result.han > 0 || result.isYakuman) {
@@ -947,9 +977,10 @@ function endRound(reason) {
     // 親流れ判定: 親がテンパイなら 連荘 (本場+1)、 ノーテンなら 流れる
     if (tenpaiSeats.includes(G.oya)) {
       G.honba++;
+      G.lastResult = 'tenpaiOya';
     } else {
       G.honba = 0;
-      // 親流れ (実装簡略: 三麻でも 自家=親固定で 局進行)
+      G.lastResult = 'notenOya';  // 親流れ
     }
   } else {
     document.getElementById('end-text').textContent = `${G.round}局 終了。`;
@@ -1020,14 +1051,28 @@ function showWinModal(seat, hand, context, result) {
 const ROUND_ORDER = ['東1', '東2', '東3', '南1', '南2', '南3'];
 function nextRound() {
   if (G.type === 'single') { location.href = 'index.html'; return; }
-  const idx = ROUND_ORDER.indexOf(G.round);
-  if (idx < 0 || idx >= ROUND_ORDER.length - 1) {
-    document.getElementById('end-title').textContent = '半荘終了';
-    document.getElementById('end-text').textContent = '東3局〜南3局まで完走しました。';
-    return;
+  // 親連荘判定: G.honba > 0 = 連荘 (前局終了時 親テンパイ or あがった親)
+  // 連荘なら 局を進めず、 honba 維持
+  // 親流れなら 局進行 + 親を反時計回り次家に
+  const continuingDealer = (G.honba > 0 && G.lastResult === 'tenpaiOya');
+  if (!continuingDealer) {
+    const idx = ROUND_ORDER.indexOf(G.round);
+    if (idx < 0 || idx >= ROUND_ORDER.length - 1) {
+      document.getElementById('end-title').textContent = '半荘終了';
+      const playingSeats = ALL_SEATS.filter(s => s !== G.emptySeat);
+      document.getElementById('end-text').innerHTML
+        = `東3局〜南3局まで完走しました。<br>最終スコア: ${playingSeats.map(s => `${SEAT_LABEL_BASE[s]}=${G.scores[s]}`).join(' / ')}`;
+      return;
+    }
+    G.round = ROUND_ORDER[idx + 1];
+    G.honba = 0;
+    // 親を反時計回り次家に (空席をスキップ)
+    const ccw = ccwFrom(G.oya);
+    for (let i = 1; i < 4; i++) {
+      if (ccw[i] !== G.emptySeat) { G.oya = ccw[i]; break; }
+    }
   }
-  G.round = ROUND_ORDER[idx + 1];
-  G.honba = 0;
+  G.lastResult = null;
   document.getElementById('end-overlay').hidden = true;
   startNewRound();
 }
@@ -1049,6 +1094,11 @@ function startNewRound() {
     const placement = pickCpuPlacement();
     G.cpuSeats = placement.cpuSeats;
     G.emptySeat = placement.emptySeat;
+  }
+  // 親が空席なら 反時計回り次家に スキップ
+  while (G.oya === G.emptySeat) {
+    const ccw = ccwFrom(G.oya);
+    G.oya = ccw[1];
   }
 
   const allTiles = buildAllTiles();
@@ -1279,12 +1329,10 @@ if (document.getElementById('table')) {
       if (G.turn !== 'bottom' || G.busy) return;
       if (!isWinning(G.hands.bottom)) return;
       const ctx = { isTsumo: true, isRiichi: G.isRiichi.bottom, isOya: G.oya === 'bottom',
-                    doraIndicator: G.doraIndicator, kitas: G.kitas.bottom, round: G.round };
+                    doraIndicator: G.doraIndicator, kitas: G.kitas.bottom, round: G.round,
+                    isIppatsu: G.riichiTurnsLeft.bottom > 0 };
       const result = calcYaku(G.hands.bottom, ctx);
-      if (result.han === 0 && !result.isYakuman) {
-        toast('役なし');
-        return;
-      }
+      if (result.han === 0 && !result.isYakuman) { toast('役なし'); return; }
       showWinModal('bottom', G.hands.bottom, ctx, result);
     });
     document.getElementById('btn-ron').addEventListener('click', () => {
@@ -1292,7 +1340,8 @@ if (document.getElementById('table')) {
       const tile = G.pendingRon.tile;
       const test = [...G.hands.bottom, tile];
       const ctx = { isTsumo: false, isRiichi: G.isRiichi.bottom, isOya: G.oya === 'bottom',
-                    doraIndicator: G.doraIndicator, kitas: G.kitas.bottom, round: G.round };
+                    doraIndicator: G.doraIndicator, kitas: G.kitas.bottom, round: G.round,
+                    isIppatsu: G.riichiTurnsLeft.bottom > 0 };
       const result = calcYaku(test, ctx);
       G.pendingRon = null;
       G.busy = false;
