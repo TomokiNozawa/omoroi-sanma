@@ -218,25 +218,28 @@ function renderRiver(seat) {
   });
 }
 
-// ─── 描画: 山 (4面均等 27牌、 起点家のカット位置にハイライト) ──
+// ─── 描画: 山 (4面均等 27牌、 起点家にカット位置+ドラ表示) ──
 function renderWalls() {
   const totalRemain = G.drawTiles.length;
-  // 各家前の山は 「初期27牌 から 既に消費した分」 を 視覚的に減らす:
-  // 簡略化: 各家27牌のうち、 「全体ツモ進行で この家から消費された分」 を引いた数を表示
-  // 実装簡略: 各家とも 27枚は固定表示、 起点家山だけ カット位置 を ハイライト
+  // ドラ表示位置 (起点家山に 王牌が入りきる場合): カット位置から右に11牌目 (右から3枚目)
+  const doraIdxInStart = (G.diceTotal >= 14)
+    ? G.cutPosInStart + 11
+    : -1;  // 隣家にまたがる場合は 簡略化で 起点家には表示せず
+  // 隣家にまたがる場合: 隣家の最初の方に ドラ表示が入る
+  const ccw = G.startSeat ? ccwFrom(G.startSeat) : [];
+  const doraIdxInNext = (G.diceTotal < 14 && G.diceTotal > 0)
+    ? (11 - G.diceTotal)  // 隣家山の最初から 11-diceTotal 牌目
+    : -1;
 
   ALL_SEATS.forEach(seat => {
     const container = document.getElementById(`wall-${seat}`);
     if (!container) return;
     container.innerHTML = '';
-    // 表示する牌数: 残量を 4面に按分 (簡略)
     const baseCount = G.walls[seat].length;
     let displayCount;
     if (totalRemain <= 0) displayCount = 0;
     else {
-      // 残量 / 4面で 平均、 ただし 起点家から優先消費 (反時計回り)
-      const consumedTotal = 108 - 14 - totalRemain;  // 自摸山+配牌で消費された数
-      // 平均消費 = consumedTotal / 4 として 各家から 等量減らす (簡略)
+      const consumedTotal = 108 - 14 - totalRemain;
       const consumedPerSeat = Math.floor(consumedTotal / 4);
       displayCount = Math.max(0, baseCount - consumedPerSeat);
     }
@@ -244,28 +247,26 @@ function renderWalls() {
     for (let i = 0; i < displayCount; i++) {
       const t = document.createElement('div');
       t.className = 'wall-tile';
-      // 起点家の山にだけ カット位置ハイライト:
-      // i = G.cutPosInStart の位置 = カット位置
-      if (seat === G.startSeat && i === G.cutPosInStart - 1) {
-        t.classList.add('wall-tile--cut-line');
+      // ドラ表示: 起点家 or 隣家 の 該当位置に 表向きの牌画像
+      let isDora = false;
+      if (seat === G.startSeat && i === doraIdxInStart && G.doraIndicator) {
+        isDora = true;
+      } else if (G.diceTotal < 14 && seat === ccw[1] && i === doraIdxInNext && G.doraIndicator) {
+        isDora = true;
       }
-      // ツモる側 = 山の左端 (i=0 が 次のツモ候補) を pulse
-      if (i === 0 && seat === G.startSeat) {
+      if (isDora) {
+        t.classList.add('wall-tile--dora');
+        const fn = TILE_IMG[G.doraIndicator.id];
+        if (fn) t.style.backgroundImage = `url('assets/${encodeURIComponent(fn)}')`;
+        t.title = 'ドラ表示: ' + TILE_NAMES[G.doraIndicator.id];
+      } else if (seat === G.startSeat && i === G.cutPosInStart - 1) {
+        t.classList.add('wall-tile--cut-line');
+      } else if (i === 0 && seat === G.startSeat) {
         t.classList.add('wall-tile--next');
       }
       container.appendChild(t);
     }
   });
-}
-
-// ─── 描画: 王牌・ドラ表示 ──────────────────────
-function renderDora() {
-  const el = document.getElementById('dora-tile');
-  if (!el) return;
-  el.innerHTML = '';
-  if (G.doraIndicator) {
-    el.appendChild(createTileEl(G.doraIndicator, { small: true }));
-  }
 }
 
 // ─── 描画: ヘッダ + 中央 ───────────────────────
@@ -305,7 +306,6 @@ function renderAll() {
   renderSeats();
   ALL_SEATS.forEach(s => { renderHand(s); renderRiver(s); });
   renderWalls();
-  renderDora();
   updateActionButtons();
   updateHint();
 }

@@ -21,12 +21,24 @@
 
     <!-- 雀卓 — 4家配置 (left=上家 / top=対面 / right=下家 / bottom=自家) -->
     <div class="table" id="table">
+      <!-- 中央: 場情報 (ドラ表示は山に物理的に表示するので 中央には書かない) -->
+      <div class="center">
+        <div class="center__round-info">
+          <span id="center-round">東1</span><br>山残 <span id="center-remain">54</span>
+        </div>
+      </div>
+
+      <!-- 河エリア (中央 box の 4方向に集合) -->
+      <div class="river-area river-area--top" id="river-top"></div>
+      <div class="river-area river-area--right" id="river-right"></div>
+      <div class="river-area river-area--bottom" id="river-bottom"></div>
+      <div class="river-area river-area--left" id="river-left"></div>
+
       <!-- 対面 (画面上) -->
       <div class="seat seat--top" id="seat-top">
         <div class="seat__hand seat__hand--enemy seat__hand--top" id="hand-top"></div>
         <div class="seat__label" id="label-top">対面</div>
         <div class="seat__wall seat__wall--top" id="wall-top"></div>
-        <div class="seat__river seat__river--top" id="river-top"></div>
       </div>
 
       <!-- 上家 (画面左) -->
@@ -34,7 +46,6 @@
         <div class="seat__hand seat__hand--enemy seat__hand--left" id="hand-left"></div>
         <div class="seat__label" id="label-left">上家</div>
         <div class="seat__wall seat__wall--left" id="wall-left"></div>
-        <div class="seat__river seat__river--left" id="river-left"></div>
       </div>
 
       <!-- 下家 (画面右) -->
@@ -42,23 +53,10 @@
         <div class="seat__hand seat__hand--enemy seat__hand--right" id="hand-right"></div>
         <div class="seat__label" id="label-right">下家</div>
         <div class="seat__wall seat__wall--right" id="wall-right"></div>
-        <div class="seat__river seat__river--right" id="river-right"></div>
-      </div>
-
-      <!-- 中央: 王牌 + ドラ表示 + 場情報 -->
-      <div class="center">
-        <div class="center__dora">
-          <div class="center__dora-label">ドラ表示</div>
-          <div class="center__dora-tile" id="dora-tile"></div>
-        </div>
-        <div class="center__round-info">
-          <span id="center-round">東1</span> ・ 山残 <span id="center-remain">54</span>
-        </div>
       </div>
 
       <!-- 自家 (画面下、 親) -->
       <div class="seat seat--bottom" id="seat-bottom">
-        <div class="seat__river seat__river--bottom" id="river-bottom"></div>
         <div class="seat__wall seat__wall--bottom" id="wall-bottom"></div>
         <div class="seat__label" id="label-bottom">あなた (親) — 東家</div>
         <div class="seat__hand seat__hand--mine seat__hand--bottom" id="hand-bottom"></div>
