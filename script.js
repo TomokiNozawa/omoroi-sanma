@@ -497,6 +497,25 @@ function initGame() {
   }
 }
 
+// ─── ロビーのバージョン表示 (version.json から動的読込) ──
+async function loadLobbyVersion() {
+  const verEl = document.getElementById('app-version');
+  const phaseEl = document.getElementById('app-phase');
+  if (!verEl) return;
+  try {
+    const res = await fetch('version.json?_=' + Date.now());
+    if (!res.ok) return;
+    const j = await res.json();
+    if (j.data?.version) verEl.textContent = j.data.version;
+    if (j.data?.phase) phaseEl.textContent = `(Phase ${j.data.phase} MVP)`;
+  } catch (e) {
+    console.warn('version.json 読込失敗', e);
+  }
+}
+if (document.getElementById('app-version')) {
+  document.addEventListener('DOMContentLoaded', loadLobbyVersion);
+}
+
 // ─── イベント結線 ───────────────────────────────
 if (document.getElementById('table')) {
   document.addEventListener('DOMContentLoaded', () => {
