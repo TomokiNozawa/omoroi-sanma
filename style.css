@@ -106,7 +106,7 @@ body {
   font-size: 13px;
 }
 
-/* 円卓 (table) */
+/* 円卓 (table) — 各家の山が 中央を囲む 雀卓風 */
 .table {
   position: relative;
   background: radial-gradient(ellipse at center, #1a5530 0%, #0d3b1f 70%, #0a2818 100%);
@@ -115,16 +115,20 @@ body {
     ".    top    ."
     "left center right"
     ".    bottom .";
-  grid-template-rows: minmax(80px, auto) 1fr minmax(100px, auto);
-  grid-template-columns: minmax(60px, auto) 1fr minmax(60px, auto);
+  grid-template-rows: auto auto auto;
+  grid-template-columns: auto auto auto;
+  align-items: center;
+  justify-items: center;
+  align-content: center;
+  justify-content: center;
   padding: 4px;
   gap: 2px;
 }
 
 .seat { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 2px; }
-.seat--top    { grid-area: top;    }
-.seat--right  { grid-area: right;  flex-direction: column; }
-.seat--bottom { grid-area: bottom; }
+.seat--top    { grid-area: top;    align-self: end; }
+.seat--right  { grid-area: right;  flex-direction: column; justify-self: start; }
+.seat--bottom { grid-area: bottom; align-self: start; }
 .seat--left   { grid-area: left;   flex-direction: column; }
 
 .seat__label { font-size: 10px; color: #aac; }
@@ -318,37 +322,41 @@ body {
   padding: 8px 16px; border-radius: 6px; cursor: pointer; font-weight: bold;
 }
 
-/* サイコロ セレモニー */
+/* サイコロ セレモニー — 卓を覆わない floating パネル */
 .dice-overlay {
-  position: fixed; inset: 0;
-  background: rgba(0,0,0,0.85);
-  display: flex; align-items: center; justify-content: center;
+  position: fixed;
+  top: 70px;       /* header(36) + hint(28) を避けて */
+  left: 50%;
+  transform: translateX(-50%);
   z-index: 110;
+  pointer-events: none;  /* 卓のクリックを通す、 modal自身は auto */
 }
 .dice-overlay[hidden] { display: none; }
 .dice-modal {
-  background: #143820;
+  background: rgba(20, 56, 32, 0.97);
   border: 2px solid #ffeb3b;
   border-radius: 14px;
-  padding: 24px 28px;
-  max-width: 380px;
-  width: 92%;
+  padding: 14px 18px;
+  max-width: 360px;
+  width: 92vw;
   text-align: center;
-  box-shadow: 0 0 30px rgba(255,235,59,0.3);
+  box-shadow: 0 4px 20px rgba(0,0,0,0.6), 0 0 20px rgba(255,235,59,0.2);
+  pointer-events: auto;
+  backdrop-filter: blur(4px);
 }
-.dice-modal__title { margin: 0 0 16px; font-size: 18px; color: #ffeb3b; }
+.dice-modal__title { margin: 0 0 8px; font-size: 15px; color: #ffeb3b; }
 .dice-row {
   display: flex; align-items: center; justify-content: center;
-  gap: 10px; margin: 16px 0;
+  gap: 6px; margin: 8px 0;
 }
 .dice {
-  font-size: 56px;
-  width: 72px; height: 72px;
+  font-size: 36px;
+  width: 48px; height: 48px;
   background: #fff;
   color: #222;
-  border-radius: 12px;
+  border-radius: 8px;
   display: flex; align-items: center; justify-content: center;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.5);
 }
 .dice--rolling {
   animation: dice-roll 0.15s infinite;
@@ -360,56 +368,56 @@ body {
   75%  { transform: rotate(270deg) scale(1.1); }
   100% { transform: rotate(360deg) scale(1); }
 }
-.dice-plus, .dice-equals { font-size: 28px; color: #ffeb3b; font-weight: bold; }
+.dice-plus, .dice-equals { font-size: 20px; color: #ffeb3b; font-weight: bold; }
 .dice-total {
-  font-size: 56px;
+  font-size: 36px;
   color: #ffeb3b;
   font-weight: bold;
-  min-width: 80px;
+  min-width: 56px;
 }
 .dice-explain {
-  font-size: 13px; color: #ddd; line-height: 1.6;
-  margin: 12px 0;
+  font-size: 12px; color: #ddd; line-height: 1.5;
+  margin: 6px 0;
 }
 .dice-counter {
   background: rgba(255,235,59,0.15);
-  padding: 10px;
+  padding: 6px 8px;
   border-radius: 8px;
-  margin: 12px 0;
+  margin: 6px 0;
 }
-.dice-counter__label { font-size: 12px; color: #aac; margin-right: 8px; }
+.dice-counter__label { font-size: 11px; color: #aac; margin-right: 8px; }
 .dice-counter__num {
-  font-size: 28px; color: #ffeb3b; font-weight: bold;
+  font-size: 22px; color: #ffeb3b; font-weight: bold;
   display: inline-block;
-  min-width: 50px;
+  min-width: 36px;
 }
 .dice-mnemonic {
   background: rgba(255,235,59,0.08);
   border: 1px solid rgba(255,235,59,0.3);
-  padding: 10px 14px;
+  padding: 6px 10px;
   border-radius: 8px;
-  margin: 12px 0;
+  margin: 6px 0;
   text-align: left;
-  font-size: 12px;
-  line-height: 1.6;
+  font-size: 11px;
+  line-height: 1.5;
   color: #ddd;
 }
 .dice-mnemonic[hidden] { display: none; }
 .dice-mnemonic__title {
-  font-size: 13px;
+  font-size: 12px;
   color: #ffeb3b;
-  margin: 0 0 6px;
+  margin: 0 0 4px;
   font-weight: bold;
   text-align: center;
 }
-.dice-mnemonic__line { margin: 4px 0; color: #f0f0f0; }
+.dice-mnemonic__line { margin: 2px 0; color: #f0f0f0; font-size: 11px; }
 .dice-mnemonic__line b { color: #ffeb3b; font-weight: bold; }
 
 .dice-ok {
   background: #4caf50; color: #fff; border: none;
-  padding: 12px 24px; border-radius: 8px;
-  font-weight: bold; font-size: 14px; cursor: pointer;
-  margin-top: 12px;
+  padding: 8px 20px; border-radius: 8px;
+  font-weight: bold; font-size: 13px; cursor: pointer;
+  margin-top: 6px;
 }
 .dice-ok[hidden] { display: none; }
 
