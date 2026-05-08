@@ -208,50 +208,76 @@ function renderHand(seat) {
   }
 }
 
-// ─── 描画: 河 ──────────────────────────────────
+// ─── 描画: 河 (top/left は DOM逆順で 新しい牌が中央寄りに) ──
 function renderRiver(seat) {
   const container = document.getElementById(`river-${seat}`);
   if (!container) return;
   container.innerHTML = '';
-  G.rivers[seat].forEach(tile => {
+  // top と left は 「中央寄り = 新しい牌」 になるよう 逆順で
+  let arr = G.rivers[seat];
+  if (seat === 'top' || seat === 'left') {
+    arr = [...arr].reverse();
+  }
+  arr.forEach(tile => {
     container.appendChild(createTileEl(tile, { river: true }));
   });
 }
 
-// ─── 描画: 山 (4面均等 27牌、 起点家にカット位置+ドラ表示) ──
+// ─── 描画: 山 (通常麻雀通り — 起点家のカット位置左から反時計回り 順次消費) ──
 function renderWalls() {
   const totalRemain = G.drawTiles.length;
-  // ドラ表示位置 (起点家山に 王牌が入りきる場合): カット位置から右に11牌目 (右から3枚目)
-  const doraIdxInStart = (G.diceTotal >= 14)
-    ? G.cutPosInStart + 11
-    : -1;  // 隣家にまたがる場合は 簡略化で 起点家には表示せず
-  // 隣家にまたがる場合: 隣家の最初の方に ドラ表示が入る
-  const ccw = G.startSeat ? ccwFrom(G.startSeat) : [];
-  const doraIdxInNext = (G.diceTotal < 14 && G.diceTotal > 0)
-    ? (11 - G.diceTotal)  // 隣家山の最初から 11-diceTotal 牌目
-    : -1;
+  // 自摸山+配牌の合計消費数 = 108 - 14 (王牌) - totalRemain
+  const consumedTotal = totalRemain > 0 ? (108 - 14 - totalRemain) : 0;
+
+  // 各家の山残量 (反時計回り順、 起点家のカット位置左から 順次消費)
+  const ccw = G.startSeat ? ccwFrom(G.startSeat) : ALL_SEATS;
+  // 起点家の自摸山対象 = カット位置左 cutPosInStart 牌
+  // 反時計回り次家以降 = 各 27牌 全部 (但し 王牌が隣家にまたがる場合は 調整必要、 簡略化省略)
+
+  let remaining = consumedTotal;
+  const consumed = { bottom: 0, right: 0, top: 0, left: 0 };
+  // ccw[0] = 起点家: カット位置左の cutPosInStart 牌だけ自摸山対象
+  const startMax = G.cutPosInStart || 0;
+  consumed[ccw[0]] = Math.min(remaining, startMax);
+  remaining -= consumed[ccw[0]];
+  // ccw[1], ccw[2], ccw[3]: 全 27牌が 自摸山対象
+  for (let i = 1; i < 4 && remaining > 0; i++) {
+    const max = 27;
+    consumed[ccw[i]] = Math.min(remaining, max);
+    remaining -= consumed[ccw[i]];
+  }
+
+  // ドラ表示位置 (起点家山にあるか 隣家にあるか)
+  const doraIdxInStart = (G.diceTotal >= 14) ? G.cutPosInStart + 11 : -1;
+  const doraIdxInNext = (G.diceTotal < 14 && G.diceTotal > 0) ? (11 - G.diceTotal) : -1;
 
   ALL_SEATS.forEach(seat => {
     const container = document.getElementById(`wall-${seat}`);
     if (!container) return;
     container.innerHTML = '';
-    const baseCount = G.walls[seat].length;
-    let displayCount;
-    if (totalRemain <= 0) displayCount = 0;
-    else {
-      const consumedTotal = 108 - 14 - totalRemain;
-      const consumedPerSeat = Math.floor(consumedTotal / 4);
-      displayCount = Math.max(0, baseCount - consumedPerSeat);
-    }
+    const baseCount = G.walls[seat].length;  // 27
+    const consumedHere = consumed[seat];
 
-    for (let i = 0; i < displayCount; i++) {
+    // 表示する牌位置 = consumedHere から baseCount まで (左側を 消費済とする)
+    // 自摸山は 山の左端から消費されるので、 表示は 左端の `consumedHere` 牌を 抜いた残りを左から並べる
+    // 視覚的に 「起点家のカット位置左から 順に減る」 ように:
+    // - 起点家: 左から consumedHere 牌だけ 抜けてる、 表示は 27-consumedHere 牌
+    // - 他家: 同様
+
+    for (let visIdx = 0; visIdx < baseCount; visIdx++) {
       const t = document.createElement('div');
       t.className = 'wall-tile';
-      // ドラ表示: 起点家 or 隣家 の 該当位置に 表向きの牌画像
+      // visIdx は 山の物理位置 0..26 (0=左端=次のツモ位置)
+      // 消費済 = visIdx < consumedHere は 表示しない (空セル)
+      if (visIdx < consumedHere) {
+        // 消費済 = 空セル (透明 or 詰めない)
+        t.style.visibility = 'hidden';
+      }
+      // ドラ表示
       let isDora = false;
-      if (seat === G.startSeat && i === doraIdxInStart && G.doraIndicator) {
+      if (seat === G.startSeat && visIdx === doraIdxInStart && G.doraIndicator) {
         isDora = true;
-      } else if (G.diceTotal < 14 && seat === ccw[1] && i === doraIdxInNext && G.doraIndicator) {
+      } else if (G.diceTotal < 14 && seat === ccw[1] && visIdx === doraIdxInNext && G.doraIndicator) {
         isDora = true;
       }
       if (isDora) {
@@ -259,10 +285,18 @@ function renderWalls() {
         const fn = TILE_IMG[G.doraIndicator.id];
         if (fn) t.style.backgroundImage = `url('assets/${encodeURIComponent(fn)}')`;
         t.title = 'ドラ表示: ' + TILE_NAMES[G.doraIndicator.id];
-      } else if (seat === G.startSeat && i === G.cutPosInStart - 1) {
-        t.classList.add('wall-tile--cut-line');
-      } else if (i === 0 && seat === G.startSeat) {
-        t.classList.add('wall-tile--next');
+        t.style.visibility = 'visible';  // ドラ表示は 消費されない
+      } else if (seat === G.startSeat && visIdx >= G.cutPosInStart) {
+        // 王牌部分 (カット位置以降)
+        t.classList.add('wall-tile--king');
+        if (visIdx === G.cutPosInStart) t.classList.add('wall-tile--cut-line');
+        t.style.visibility = 'visible';
+      } else if (visIdx === consumedHere && seat === ccw[(consumedTotal === 0 ? 0 : 0)]) {
+        // 次のツモ位置 = 起点家の カット位置左 から 反時計回りに 消費中の 先頭
+        // 簡略: 起点家でカット位置左の最先頭 (consumed_in_start) を ハイライト、 起点家自摸山が空になったら 次家へ
+        if (visIdx >= consumedHere) {  // 消費済でない 先頭
+          t.classList.add('wall-tile--next');
+        }
       }
       container.appendChild(t);
     }
