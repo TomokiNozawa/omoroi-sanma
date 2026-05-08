@@ -86,7 +86,7 @@ body {
 }
 .center__round-info #center-remain { color: #ffeb3b; font-size: 14px; display: block; }
 
-/* 河エリア — 中央 box の 4方向、 中央寄りから外側に伸びる */
+/* 河エリア — 中央 box の 4方向、 6×3 grid 固定 (max18牌) */
 .river-area {
   position: absolute;
   display: grid;
@@ -94,33 +94,36 @@ body {
   padding: 2px;
   z-index: 2;
 }
+.river-area--bottom, .river-area--top {
+  grid-template-columns: repeat(6, auto);
+  grid-template-rows: repeat(3, auto);
+}
+.river-area--left, .river-area--right {
+  grid-template-rows: repeat(6, auto);
+  grid-template-columns: repeat(3, auto);
+  grid-auto-flow: column;
+}
 .river-area--bottom {
-  top: calc(50% + 32px);  /* 中央box 下端 */
+  top: calc(50% + 32px);
   left: 50%;
   transform: translateX(-50%);
-  grid-template-columns: repeat(6, auto);
 }
 .river-area--top {
-  bottom: calc(50% + 32px);  /* 中央box 上端 */
+  bottom: calc(50% + 32px);
   left: 50%;
   transform: translateX(-50%);
-  grid-template-columns: repeat(6, auto);
 }
 .river-area--top .tile { transform: rotate(180deg); }
 .river-area--left {
-  right: calc(50% + 32px);  /* 中央box 左端 */
+  right: calc(50% + 32px);
   top: 50%;
   transform: translateY(-50%);
-  grid-template-rows: repeat(6, auto);
-  grid-auto-flow: column;
 }
 .river-area--left .tile { transform: rotate(90deg); }
 .river-area--right {
-  left: calc(50% + 32px);  /* 中央box 右端 */
+  left: calc(50% + 32px);
   top: 50%;
   transform: translateY(-50%);
-  grid-template-rows: repeat(6, auto);
-  grid-auto-flow: column;
 }
 .river-area--right .tile { transform: rotate(-90deg); }
 
@@ -237,7 +240,7 @@ body {
 .tile--mine.tile--just-drawn { box-shadow: 0 0 6px rgba(255,152,0,0.8); }
 .tile--small { width: 18px; height: 24px; }
 .tile--mini  { width: 14px; height: 19px; }
-.tile--river { width: 18px; height: 24px; }
+.tile--river { width: 16px; height: 22px; }
 
 /* ── アクションバー ── */
 .action-bar { display: flex; gap: 4px; padding: 6px 8px; background: rgba(0,0,0,0.55); align-items: center; justify-content: space-around; }
@@ -300,7 +303,7 @@ body {
   .tile { width: 28px; height: 38px; }
   .tile--small { width: 22px; height: 30px; }
   .tile--mini  { width: 16px; height: 22px; }
-  .tile--river { width: 22px; height: 30px; }
+  .tile--river { width: 18px; height: 26px; }
   .lobby { max-width: 600px; }
   .game__header { font-size: 13px; }
   .wall-tile { width: 16px; height: 22px; }
