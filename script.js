@@ -346,7 +346,8 @@ function endRound(reason) {
 }
 
 // ─── 次の局へ ──────────────────────────────────
-const ROUND_ORDER = ['東1', '東2', '東3', '東4', '南1', '南2', '南3', '南4'];
+// 三麻 半荘 = 東3局 + 南3局 = 6局 (野沢さん指示 2026-05-08)
+const ROUND_ORDER = ['東1', '東2', '東3', '南1', '南2', '南3'];
 function nextRound() {
   if (G.type === 'single') {
     location.href = 'index.html';
@@ -356,7 +357,7 @@ function nextRound() {
   if (idx < 0 || idx >= ROUND_ORDER.length - 1) {
     // 半荘終了
     document.getElementById('end-title').textContent = '半荘終了';
-    document.getElementById('end-text').textContent = '東4局〜南4局まで完走しました。';
+    document.getElementById('end-text').textContent = '東3局〜南3局まで完走しました。';
     return;
   }
   G.round = ROUND_ORDER[idx + 1];
