@@ -277,13 +277,22 @@ function renderWalls() {
     // - 起点家: 左から consumedHere 牌だけ 抜けてる、 表示は 27-consumedHere 牌
     // - 他家: 同様
 
+    // 各家の自摸山 範囲 (= 王牌以外):
+    // - 起点家: visIdx 0..cutPosInStart-1 が自摸山 (cutPosInStart 以降は王牌)
+    // - 次家以降: visIdx 0..26 全て自摸山
+    // 自摸山は **右端から左方向に消費される** (= 起点家のカット位置のすぐ左 から取られる)
+    // 各家ごとの自摸山右端 = 起点家=cutPosInStart-1、 他家=26
+    const ccwIdx = ccw.indexOf(seat);
+    const drawWallEndIdx = (ccwIdx === 0) ? G.cutPosInStart - 1 : 26;
+    const drawWallStartIdx = (ccwIdx === 0) ? 0 : 0;
+
     for (let visIdx = 0; visIdx < baseCount; visIdx++) {
       const t = document.createElement('div');
       t.className = 'wall-tile';
-      // visIdx は 山の物理位置 0..26 (0=左端=次のツモ位置)
-      // 消費済 = visIdx < consumedHere は 表示しない (空セル)
-      if (visIdx < consumedHere) {
-        // 消費済 = 空セル (透明 or 詰めない)
+      // 消費済判定: 自摸山の右端から N 牌が消費 → visIdx > drawWallEndIdx - consumedHere && visIdx <= drawWallEndIdx
+      const inDrawWall = visIdx >= drawWallStartIdx && visIdx <= drawWallEndIdx;
+      const consumedFromRight = consumedHere;
+      if (inDrawWall && visIdx > drawWallEndIdx - consumedFromRight) {
         t.style.visibility = 'hidden';
       }
       // ドラ表示 (カット位置 + 2 = 王牌の左から3枚目)
@@ -304,12 +313,11 @@ function renderWalls() {
         t.classList.add('wall-tile--king');
         if (visIdx === G.cutPosInStart) t.classList.add('wall-tile--cut-line');
         t.style.visibility = 'visible';
-      } else if (visIdx === consumedHere && seat === ccw[(consumedTotal === 0 ? 0 : 0)]) {
-        // 次のツモ位置 = 起点家の カット位置左 から 反時計回りに 消費中の 先頭
-        // 簡略: 起点家でカット位置左の最先頭 (consumed_in_start) を ハイライト、 起点家自摸山が空になったら 次家へ
-        if (visIdx >= consumedHere) {  // 消費済でない 先頭
-          t.classList.add('wall-tile--next');
-        }
+      } else if (inDrawWall && visIdx === drawWallEndIdx - consumedFromRight && consumedFromRight < (drawWallEndIdx - drawWallStartIdx + 1)) {
+        // 次のツモ位置 = この家の自摸山 右端から 消費済の すぐ左 (= 次に取られる牌)
+        // ただし この家がまだ自摸山を持っているとき (= 完全消費されていない時) のみハイライト
+        // 起点家以外は 起点家が空になってから 自分の山が始まる、 簡略: 起点家のみハイライト
+        if (ccwIdx === 0) t.classList.add('wall-tile--next');
       }
       container.appendChild(t);
     }
