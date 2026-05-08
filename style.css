@@ -146,43 +146,63 @@ body {
   justify-content: center;
 }
 
-/* 山 (壁牌) */
-.seat__wall {
-  display: flex;
-  flex-direction: row;
-  flex-wrap: nowrap;
-  gap: 1px;
+/* 山 (壁牌) — 2段積みで実物雀荘風 */
+.seat__wall-wrap {
   position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  margin: 4px 0;
 }
-.seat__wall--top, .seat__wall--bottom {
-  flex-direction: row;
-  max-width: 90vw;
-  overflow: hidden;
+.seat__wall {
+  display: grid;
+  grid-template-rows: auto auto;
+  grid-auto-flow: column;
+  gap: 1px;
+  padding: 4px 6px;
+  background: rgba(0,0,0,0.25);
+  border-radius: 4px;
+  border: 1px solid rgba(255,255,255,0.1);
 }
 .seat__wall--right {
-  flex-direction: column;
+  grid-template-rows: none;
+  grid-template-columns: auto auto;
+  grid-auto-flow: row;
 }
 .wall-tile {
-  width: 14px;
-  height: 18px;
+  width: 18px;
+  height: 24px;
   background: linear-gradient(180deg, #0e6e3e 0%, #094a28 100%);
   border: 1px solid #052010;
   border-radius: 2px;
   flex-shrink: 0;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.5);
 }
 .seat__wall--right .wall-tile {
-  width: 18px;
-  height: 14px;
+  width: 24px;
+  height: 18px;
 }
 .wall-tile--next {
   background: linear-gradient(180deg, #ffeb3b 0%, #fbc02d 100%);
-  box-shadow: 0 0 6px #ffeb3b;
+  border-color: #f57f17;
+  box-shadow: 0 0 8px #ffeb3b, 0 1px 2px rgba(0,0,0,0.5);
   animation: pulse 1.2s infinite;
+  position: relative;
 }
 @keyframes pulse {
-  0%, 100% { box-shadow: 0 0 6px #ffeb3b; }
-  50% { box-shadow: 0 0 14px #ffeb3b; }
+  0%, 100% { box-shadow: 0 0 8px #ffeb3b, 0 1px 2px rgba(0,0,0,0.5); }
+  50% { box-shadow: 0 0 18px #ffeb3b, 0 1px 2px rgba(0,0,0,0.5); }
 }
+.seat__wall-label {
+  font-size: 10px;
+  color: #ffeb3b;
+  font-weight: bold;
+  text-shadow: 0 0 4px rgba(0,0,0,0.8);
+  pointer-events: none;
+}
+.seat__wall-label--top    { order: -1; }
+.seat__wall-label--bottom { order: 99; }
 
 /* 牌 */
 .tile {
@@ -339,17 +359,17 @@ body {
   .tile--river { width: 26px; height: 36px; font-size: 20px; }
   .lobby { max-width: 600px; }
   .game__header { font-size: 14px; }
-  .wall-tile { width: 16px; height: 22px; }
-  .seat__wall--right .wall-tile { width: 22px; height: 16px; }
+  .wall-tile { width: 22px; height: 30px; }
+  .seat__wall--right .wall-tile { width: 30px; height: 22px; }
 }
 
 /* ── スマホ横向き ────────────────── */
 @media (max-height: 500px) and (orientation: landscape) {
-  .game { grid-template-rows: 30px 1fr 50px; }
+  .game { grid-template-rows: 30px 24px 1fr 50px; }
   .tile { width: 22px; height: 32px; font-size: 16px; }
   .tile--small { width: 18px; height: 26px; font-size: 12px; }
   .tile--mini  { width: 14px; height: 20px; font-size: 10px; }
   .seat__river { padding: 1px; }
-  .wall-tile { width: 12px; height: 16px; }
-  .seat__wall--right .wall-tile { width: 16px; height: 12px; }
+  .wall-tile { width: 14px; height: 20px; }
+  .seat__wall--right .wall-tile { width: 20px; height: 14px; }
 }
