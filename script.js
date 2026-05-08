@@ -1,38 +1,55 @@
-// おもろい三麻 — Phase 1 MVP (v0.1.0)
-// ロビー + 配牌 + 円卓レイアウト 描画 まで
+// おもろい三麻 — Phase 1 MVP v0.2.0
+// 配牌 + 山視覚化 + ツモ + 打牌 + CPU + 局進行 + 流局判定
 
 // ─── 牌定義 ─────────────────────────────────────
-// 牌ID 0-26 (種類別)、 各 4枚 = 全 108牌 (Sanma)
-// 0: 1m, 1: 9m  (萬子は1/9のみ、 三麻ルール)
-// 2-10: 1p-9p   (筒子)
-// 11-19: 1s-9s  (索子)
-// 20-26: 東/南/西/北/白/發/中
 const TILE_NAMES = [
   '一萬', '九萬',
   '一筒', '二筒', '三筒', '四筒', '五筒', '六筒', '七筒', '八筒', '九筒',
   '一索', '二索', '三索', '四索', '五索', '六索', '七索', '八索', '九索',
   '東', '南', '西', '北', '白', '發', '中'
 ];
-// Unicode Mahjong Tiles (U+1F000-U+1F02B) — 簡易表示
 const TILE_UNICODE = [
-  '🀇', '🀏',                                  // 1m, 9m
-  '🀙', '🀚', '🀛', '🀜', '🀝', '🀞', '🀟', '🀠', '🀡',  // 1p-9p
-  '🀐', '🀑', '🀒', '🀓', '🀔', '🀕', '🀖', '🀗', '🀘',  // 1s-9s
-  '🀀', '🀁', '🀂', '🀃', '🀆', '🀅', '🀄'           // 東南西北白發中
+  '🀇', '🀏',
+  '🀙', '🀚', '🀛', '🀜', '🀝', '🀞', '🀟', '🀠', '🀡',
+  '🀐', '🀑', '🀒', '🀓', '🀔', '🀕', '🀖', '🀗', '🀘',
+  '🀀', '🀁', '🀂', '🀃', '🀆', '🀅', '🀄'
 ];
-// 赤ドラ判定: 5筒 (id=6) と 5索 (id=15) の 全4枚 = 計8枚 (野沢さん指定 2026-05-08)
-const RED_DORA_IDS = new Set([6, 15]);
+const RED_DORA_IDS = new Set([6, 15]); // 5p, 5s 全枚 (計8枚)
+const KITA_ID = 23; // 北
+const SEATS = ['p0', 'p1', 'p2'];
+const SEAT_LABELS = { p0: 'あなた', p1: 'CPU上家', p2: 'CPU下家' };
+const HAND_DOM_ID = { p0: 'hand-bottom', p1: 'hand-top', p2: 'hand-right' };
+const RIVER_DOM_ID = { p0: 'river-bottom', p1: 'river-top', p2: 'river-right' };
+const WALL_DOM_ID = { p0: 'wall-bottom', p1: 'wall-top', p2: 'wall-right' };
+
+// ─── ゲーム状態 ──────────────────────────────────
+const G = {
+  mode: 'cpu',
+  type: 'hanchan',
+  round: '東1',
+  honba: 0,
+  oya: 'p0',
+  wall: [],         // 全108牌
+  drawWall: [],     // 自摸山 (王牌除く)
+  kingWall: [],     // 王牌14牌
+  doraIndicator: null,
+  hands: { p0: [], p1: [], p2: [] },
+  rivers: { p0: [], p1: [], p2: [] },
+  kitas: { p0: 0, p1: 0, p2: 0 }, // 北抜き枚数
+  turn: 'p0',
+  selected: null,   // 選択中の牌 index (p0 のみ)
+  justDrawn: null,  // ツモった牌 index (打牌の主候補)
+  busy: false,      // 連打防止
+};
 
 // ─── 牌山生成 (Fisher-Yates) ────────────────────
 function buildWall() {
-  // 各種4枚で 計108牌
   const wall = [];
   for (let id = 0; id < 27; id++) {
     for (let copy = 0; copy < 4; copy++) {
       wall.push({ id, copy, isRed: RED_DORA_IDS.has(id) });
     }
   }
-  // Fisher-Yates シャッフル
   for (let i = wall.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     [wall[i], wall[j]] = [wall[j], wall[i]];
@@ -42,118 +59,348 @@ function buildWall() {
 
 // ─── 配牌 ────────────────────────────────────────
 function deal(wall) {
-  // 三麻: 各家 13牌、 親 (自分=p0) は 14牌目を即自摸
-  // 残りは 王牌 14牌 (ドラ表示+嶺上) + 自摸山
   const hands = { p0: [], p1: [], p2: [] };
   let idx = 0;
+  // 4-4-4-1 で 各家13牌
   for (let round = 0; round < 4; round++) {
-    for (const p of ['p0', 'p1', 'p2']) {
-      const n = round < 3 ? 4 : 1;  // 4-4-4-1 配牌 (合計13)
+    for (const p of SEATS) {
+      const n = round < 3 ? 4 : 1;
       for (let k = 0; k < n; k++) hands[p].push(wall[idx++]);
     }
   }
-  // 親 自摸 1牌 追加 → 14牌
-  hands.p0.push(wall[idx++]);
-
   // 王牌: 山の末尾14牌
-  const kingWall = wall.slice(wall.length - 14);
-  const drawWall = wall.slice(idx, wall.length - 14);
-  // ドラ表示牌 = 王牌の上段右から3枚目 (kingWall[10]) 慣例
-  const doraIndicator = kingWall[10];
+  const kingStart = wall.length - 14;
+  const kingWall = wall.slice(kingStart);
+  // 自摸山 = 配牌後 〜 王牌前
+  const drawWall = wall.slice(idx, kingStart);
+  const doraIndicator = kingWall[10]; // 慣例上の位置
 
   return { hands, drawWall, kingWall, doraIndicator };
 }
 
-// ─── 牌ソート ───────────────────────────────────
+// ─── ソート ─────────────────────────────────────
 function sortHand(hand) {
-  return [...hand].sort((a, b) => {
-    if (a.id !== b.id) return a.id - b.id;
-    return a.copy - b.copy;
-  });
+  return [...hand].sort((a, b) => (a.id !== b.id) ? a.id - b.id : a.copy - b.copy);
 }
 
-// ─── 牌 → DOM Element ──────────────────────────
-function createTileEl(tile, options = {}) {
+// ─── DOM 生成 ───────────────────────────────────
+function createTileEl(tile, opts = {}) {
   const el = document.createElement('div');
   el.className = 'tile';
-  if (options.small) el.classList.add('tile--small');
-  if (options.mini)  el.classList.add('tile--mini');
-  if (options.mine)  el.classList.add('tile--mine');
-  if (options.back) {
+  if (opts.small) el.classList.add('tile--small');
+  if (opts.mini)  el.classList.add('tile--mini');
+  if (opts.river) el.classList.add('tile--river');
+  if (opts.mine)  el.classList.add('tile--mine');
+  if (opts.justDrawn) el.classList.add('tile--just-drawn');
+  if (opts.back) {
     el.classList.add('tile--back');
-    el.textContent = '🀫';
+    el.textContent = '';
   } else {
     el.textContent = TILE_UNICODE[tile.id];
     el.title = TILE_NAMES[tile.id] + (tile.isRed ? ' (赤ドラ)' : '');
     if (tile.isRed) el.classList.add('tile--red');
   }
-  el.dataset.tileId = tile.id;
-  el.dataset.tileCopy = tile.copy;
+  if (tile) {
+    el.dataset.tileId = tile.id;
+    el.dataset.tileCopy = tile.copy;
+  }
   return el;
 }
 
-// ─── 描画 ───────────────────────────────────────
-function renderHand(containerId, hand, options = {}) {
-  const container = document.getElementById(containerId);
+// ─── 描画: 手牌 ─────────────────────────────────
+function renderHand(p) {
+  const container = document.getElementById(HAND_DOM_ID[p]);
   if (!container) return;
   container.innerHTML = '';
-  const sorted = options.back ? hand : sortHand(hand);
-  for (const tile of sorted) {
-    container.appendChild(createTileEl(tile, options));
+  if (p === 'p0') {
+    // 自分: 表向き、ソート済 + 末尾にツモ牌 (just-drawn 印)
+    const sorted = sortHand(G.hands.p0.filter((_, i) => i !== G.justDrawn));
+    const drawnTile = (G.justDrawn != null) ? G.hands.p0[G.justDrawn] : null;
+    sorted.forEach((tile, i) => {
+      const el = createTileEl(tile, { mine: true });
+      // クリックで選択
+      el.addEventListener('click', () => onMyHandClick(tile, false, i));
+      if (G.selected === tile) el.classList.add('tile--selected');
+      container.appendChild(el);
+    });
+    if (drawnTile) {
+      // 末尾に少し離してツモ牌
+      const sep = document.createElement('span');
+      sep.style.cssText = 'width:6px;display:inline-block;';
+      container.appendChild(sep);
+      const el = createTileEl(drawnTile, { mine: true, justDrawn: true });
+      el.addEventListener('click', () => onMyHandClick(drawnTile, true));
+      if (G.selected === drawnTile) el.classList.add('tile--selected');
+      container.appendChild(el);
+    }
+  } else {
+    // CPU: 伏せ
+    G.hands[p].forEach(() => {
+      container.appendChild(createTileEl(null, { back: true, small: true }));
+    });
   }
 }
 
-function renderKingWall(king, doraIndicator) {
+// ─── 描画: 河 ───────────────────────────────────
+function renderRiver(p) {
+  const container = document.getElementById(RIVER_DOM_ID[p]);
+  if (!container) return;
+  container.innerHTML = '';
+  G.rivers[p].forEach(tile => {
+    container.appendChild(createTileEl(tile, { river: true }));
+  });
+}
+
+// ─── 描画: 山 (各家前に伏せ表示) ──────────────────
+function renderWall() {
+  // 各家前の山に「残山 / 3」 枚ずつ振り分けて 視覚的に表示
+  const remain = G.drawWall.length;
+  const perSeat = Math.ceil(remain / 3);
+  ['p0', 'p1', 'p2'].forEach((p, i) => {
+    const container = document.getElementById(WALL_DOM_ID[p]);
+    if (!container) return;
+    container.innerHTML = '';
+    const start = i * perSeat;
+    const end = Math.min(start + perSeat, remain);
+    for (let k = start; k < end; k++) {
+      const t = document.createElement('div');
+      t.className = 'wall-tile';
+      // 次にツモる山牌を ハイライト (drawWall の先頭 = wall[0])
+      if (k === 0) t.classList.add('wall-tile--next');
+      container.appendChild(t);
+    }
+  });
+}
+
+// ─── 描画: 王牌 ────────────────────────────────
+function renderKingWall() {
   const tilesEl = document.getElementById('king-tiles');
   if (!tilesEl) return;
   tilesEl.innerHTML = '';
-  // 簡易表示: 王牌14牌のうち ドラ表示1牌だけ表向き、 残りは伏せ (mini サイズ)
-  for (let i = 0; i < king.length; i++) {
-    const isDora = (king[i] === doraIndicator);
-    tilesEl.appendChild(createTileEl(king[i], { mini: true, back: !isDora }));
+  G.kingWall.forEach((tile) => {
+    const isDora = (tile === G.doraIndicator);
+    tilesEl.appendChild(createTileEl(tile, { mini: true, back: !isDora }));
+  });
+}
+
+// ─── 描画: ヘッダ情報 ──────────────────────────
+function renderHeader() {
+  document.getElementById('game-round').textContent = `${G.round}局 ${G.honba}本場`;
+  document.getElementById('center-round').textContent = G.round;
+  document.getElementById('game-remain').textContent = `山残: ${G.drawWall.length}`;
+  document.getElementById('game-turn').textContent = G.turn === 'p0' ? 'あなたの番' : `${SEAT_LABELS[G.turn]} の番`;
+}
+
+// ─── 全描画 ─────────────────────────────────────
+function renderAll() {
+  renderHeader();
+  ['p0', 'p1', 'p2'].forEach(p => { renderHand(p); renderRiver(p); });
+  renderWall();
+  renderKingWall();
+  updateActionButtons();
+}
+
+// ─── アクションボタン制御 ──────────────────────
+function updateActionButtons() {
+  const myTurn = (G.turn === 'p0' && !G.busy);
+  // 自分の番で 14牌持っている時のみ 打牌可能
+  const has14 = (G.hands.p0.length === 14);
+  document.getElementById('btn-discard').disabled = !(myTurn && has14 && G.selected);
+  // 北抜き: 14牌中 北 (id=23) を持っているか
+  const hasKita = G.hands.p0.some(t => t.id === KITA_ID);
+  document.getElementById('btn-kita').disabled = !(myTurn && has14 && hasKita);
+  // ツモ: Phase 1 では「あがりツモ」 はまだ判定なし
+  document.getElementById('btn-tsumo').disabled = true; // 役判定実装まで disabled
+  document.getElementById('btn-riichi').disabled = true; // Phase 3
+}
+
+// ─── 自分の手牌タップ ─────────────────────────
+function onMyHandClick(tile, isJustDrawn, idx) {
+  if (G.turn !== 'p0' || G.busy) return;
+  if (G.hands.p0.length !== 14) return;
+  G.selected = (G.selected === tile) ? null : tile;
+  renderHand('p0');
+  updateActionButtons();
+}
+
+// ─── ツモ動作 ───────────────────────────────────
+function drawTile(p) {
+  if (G.drawWall.length === 0) return null;
+  const tile = G.drawWall.shift();
+  G.hands[p].push(tile);
+  if (p === 'p0') G.justDrawn = G.hands.p0.length - 1;
+  return tile;
+}
+
+// ─── 打牌動作 ──────────────────────────────────
+function discardTile(p, tile) {
+  const idx = G.hands[p].indexOf(tile);
+  if (idx < 0) return false;
+  G.hands[p].splice(idx, 1);
+  G.rivers[p].push(tile);
+  if (p === 'p0') {
+    G.selected = null;
+    G.justDrawn = null;
+  }
+  return true;
+}
+
+// ─── 北抜き動作 ────────────────────────────────
+function kitaNuki(p) {
+  const idx = G.hands[p].findIndex(t => t.id === KITA_ID);
+  if (idx < 0) return false;
+  const tile = G.hands[p].splice(idx, 1)[0];
+  G.kitas[p]++;
+  // 嶺上から補充自摸 (王牌の末尾から)
+  if (G.kingWall.length > 0) {
+    const replacement = G.kingWall.pop();
+    G.hands[p].push(replacement);
+    if (p === 'p0') G.justDrawn = G.hands[p].length - 1;
+  }
+  toast(`${SEAT_LABELS[p]} 北抜き (+1翻) / 抜き合計 ${G.kitas[p]}`);
+  return true;
+}
+
+// ─── ターン進行 ────────────────────────────────
+function nextTurn() {
+  const i = SEATS.indexOf(G.turn);
+  G.turn = SEATS[(i + 1) % 3];
+}
+
+function startTurn() {
+  if (G.drawWall.length === 0) return endRound('流局');
+  if (G.turn === 'p0') {
+    // 自分のツモ
+    drawTile('p0');
+    renderAll();
+  } else {
+    // CPU 思考 (簡易)
+    G.busy = true;
+    renderAll();
+    setTimeout(() => cpuPlay(G.turn), 600);
   }
 }
 
-function updateRemain(remain) {
-  document.getElementById('wall-count').textContent = remain;
-  document.getElementById('game-remain').textContent = `山残: ${remain}`;
-}
-
-// ─── ゲーム初期化 ────────────────────────────────
-function initGame() {
-  const params = new URLSearchParams(location.search);
-  const mode = params.get('mode') || 'cpu';      // cpu | online
-  const type = params.get('type') || 'hanchan';  // hanchan | single
-
-  const wall = buildWall();
-  const { hands, drawWall, kingWall, doraIndicator } = deal(wall);
-
-  // 描画
-  renderHand('hand-bottom', hands.p0, { mine: true });
-  renderHand('hand-top', hands.p1, { back: true, small: true });
-  renderHand('hand-right', hands.p2, { back: true, small: true });
-  renderKingWall(kingWall, doraIndicator);
-  updateRemain(drawWall.length);
-
-  // 状態は global に置いておく (Phase 1 はシンプルに)
-  window.__game = { mode, type, wall, drawWall, kingWall, doraIndicator, hands, turn: 'p0' };
-
-  console.log('[omoroi-sanma] 配牌完了', window.__game);
-
-  // オンボーディング (初回のみ)
-  if (!localStorage.getItem('omoroi-guide-done')) {
-    showGuide();
+// ─── CPU AI (Phase 1: シンプル) ────────────────
+function cpuPlay(p) {
+  // ツモ
+  drawTile(p);
+  renderHand(p);
+  // 北を持ってたら北抜き → 再自摸
+  const kitaIdx = G.hands[p].findIndex(t => t.id === KITA_ID);
+  if (kitaIdx >= 0 && Math.random() > 0.1) { // 確率で 即抜く
+    setTimeout(() => {
+      kitaNuki(p);
+      renderAll();
+      setTimeout(() => cpuDiscard(p), 400);
+    }, 400);
+  } else {
+    setTimeout(() => cpuDiscard(p), 600);
   }
 }
 
-// ─── オンボーディング ───────────────────────────
+function cpuDiscard(p) {
+  // シンプル戦略: 字牌の単独 → 端牌 → ランダム
+  const counts = {};
+  G.hands[p].forEach(t => { counts[t.id] = (counts[t.id] || 0) + 1; });
+  // 単独字牌 (id 20-26、 北は除く=23 のみ抜き候補なので 字牌その他)
+  let target = null;
+  for (let id = 20; id <= 26; id++) {
+    if (id === KITA_ID) continue;
+    if (counts[id] === 1) {
+      target = G.hands[p].find(t => t.id === id);
+      break;
+    }
+  }
+  // 端牌 1m/9m/1p/9p/1s/9s 単独
+  if (!target) {
+    const ends = [0, 1, 2, 10, 11, 19];
+    for (const id of ends) {
+      if (counts[id] === 1) {
+        target = G.hands[p].find(t => t.id === id);
+        break;
+      }
+    }
+  }
+  // それでもなければ ツモ牌をそのまま打牌
+  if (!target) target = G.hands[p][G.hands[p].length - 1];
+
+  discardTile(p, target);
+  toast(`${SEAT_LABELS[p]} が ${TILE_NAMES[target.id]} を打牌`);
+  renderAll();
+  G.busy = false;
+  setTimeout(() => {
+    nextTurn();
+    startTurn();
+  }, 400);
+}
+
+// ─── 局終了 ────────────────────────────────────
+function endRound(reason) {
+  document.getElementById('end-title').textContent = reason;
+  document.getElementById('end-text').textContent =
+    reason === '流局'
+      ? `山が尽きました (${G.round}局 終了)。 Phase 1 では あがり判定 未実装のため、 通常は 流局 で 局終了します。`
+      : `${G.round}局 終了。`;
+  document.getElementById('end-overlay').hidden = false;
+}
+
+// ─── 次の局へ ──────────────────────────────────
+const ROUND_ORDER = ['東1', '東2', '東3', '東4', '南1', '南2', '南3', '南4'];
+function nextRound() {
+  if (G.type === 'single') {
+    location.href = 'index.html';
+    return;
+  }
+  const idx = ROUND_ORDER.indexOf(G.round);
+  if (idx < 0 || idx >= ROUND_ORDER.length - 1) {
+    // 半荘終了
+    document.getElementById('end-title').textContent = '半荘終了';
+    document.getElementById('end-text').textContent = '東4局〜南4局まで完走しました。';
+    return;
+  }
+  G.round = ROUND_ORDER[idx + 1];
+  G.honba = 0;
+  document.getElementById('end-overlay').hidden = true;
+  startNewRound();
+}
+
+// ─── 局開始 ────────────────────────────────────
+function startNewRound() {
+  G.wall = buildWall();
+  const dealResult = deal(G.wall);
+  G.hands = dealResult.hands;
+  G.drawWall = dealResult.drawWall;
+  G.kingWall = dealResult.kingWall;
+  G.doraIndicator = dealResult.doraIndicator;
+  G.rivers = { p0: [], p1: [], p2: [] };
+  G.kitas = { p0: 0, p1: 0, p2: 0 };
+  G.turn = G.oya; // 親から
+  G.selected = null;
+  G.justDrawn = G.hands.p0.length === 14 ? G.hands.p0.length - 1 : null; // 親は配牌時点で14牌
+  G.busy = false;
+  renderAll();
+}
+
+// ─── トースト ──────────────────────────────────
+let toastTimer = null;
+function toast(text) {
+  const el = document.getElementById('toast');
+  if (!el) return;
+  el.textContent = text;
+  el.hidden = false;
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { el.hidden = true; }, 1800);
+}
+
+// ─── オンボーディング ──────────────────────────
 const GUIDE_STEPS = [
-  { title: '配牌完了!', text: '手牌13牌+ツモ1牌が配られました。 画面下が「あなた」、 上が「CPU上家」、 右が「CPU下家」 です。' },
-  { title: '🀙 中央=山', text: '画面中央の「山」 から、 ツモる順に牌を引きます。 山残り枚数が右上に表示されます。' },
-  { title: '🀫 王牌とドラ表示', text: '中央の点線枠が「王牌 (王様の牌)」 14枚。 1枚だけ表向きの牌が「ドラ表示」 で、 その次の牌が「ドラ」 (1翻 加算) になります。' },
-  { title: '🀃 北抜き', text: '北 (西家の風) を引いたら 「北抜き」 ボタンで抜けます。 抜くたび 1翻、 嶺上 (王牌の右) から補充自摸。 関西ルール。' },
-  { title: '✨ 全部赤ドラ', text: '5筒×4枚 + 5索×4枚 の 計8枚は 全部赤ドラ。 引いただけで 1翻ずつ 加算 = 高翻数で気持ちよく勝てる仕様。' },
-  { title: 'はじめよう!', text: '3・3・3・3・2 の ペア (4面子+1雀頭) を作るのが目的。 役を覚えなくても、 揃えれば あがれます。 ガイドはいつでも 右上の📚 から再表示できます。' }
+  { title: '配牌完了!', text: '手牌13牌+ツモ1牌が配られました (親なので)。 画面下が「あなた」、 上=「CPU上家」、 右=「CPU下家」 です。' },
+  { title: '🟡 山と次のツモ位置', text: '各家の前に山が積まれています。 黄色く光る牌が「次にツモる位置」 です。 ツモは山の左から順に取られます。' },
+  { title: '🀫 王牌とドラ表示', text: '中央の点線枠が王牌14枚。 1枚だけ表向きの牌が「ドラ表示」 で、 その次の牌が「ドラ」 (1翻 加算)。' },
+  { title: '🀃 北抜き', text: '北 (🀃) を引いたら 「北抜き」 ボタンで抜けます。 抜くたび 1翻、 嶺上 (王牌の末尾) から補充自摸 (関西ルール)。' },
+  { title: '✨ 全部赤ドラ', text: '5筒×4枚 + 5索×4枚 = 計8枚 全部赤ドラ。 引いただけで 1翻ずつ加算 = 高翻数で気持ちよく勝てる仕様。' },
+  { title: 'はじめよう!', text: '牌をタップ → 「打牌」 ボタンで捨てます。 次は CPU上家 → CPU下家 → あなた の順。 3・3・3・3・2 を作るのが目的!' }
 ];
 let guideIdx = 0;
 
@@ -176,10 +423,29 @@ function finishGuide() {
   localStorage.setItem('omoroi-guide-done', '1');
 }
 
-// ─── イベント結線 (game.html only) ─────────────────
+// ─── ゲーム初期化 ────────────────────────────────
+function initGame() {
+  const params = new URLSearchParams(location.search);
+  G.mode = params.get('mode') || 'cpu';
+  G.type = params.get('type') || 'hanchan';
+  G.round = '東1';
+  G.honba = 0;
+  G.oya = 'p0';
+
+  startNewRound();
+
+  // オンボーディング (初回のみ)
+  if (!localStorage.getItem('omoroi-guide-done')) {
+    setTimeout(showGuide, 500);
+  }
+}
+
+// ─── イベント結線 ───────────────────────────────
 if (document.getElementById('table')) {
   document.addEventListener('DOMContentLoaded', () => {
     initGame();
+
+    // ガイド
     document.getElementById('guide-next')?.addEventListener('click', () => {
       guideIdx++;
       if (guideIdx >= GUIDE_STEPS.length) finishGuide();
@@ -187,5 +453,28 @@ if (document.getElementById('table')) {
     });
     document.getElementById('guide-skip')?.addEventListener('click', finishGuide);
     document.getElementById('guide-btn')?.addEventListener('click', showGuide);
+
+    // 打牌ボタン
+    document.getElementById('btn-discard').addEventListener('click', () => {
+      if (G.turn !== 'p0' || G.busy || !G.selected) return;
+      const tile = G.selected;
+      discardTile('p0', tile);
+      toast(`あなたが ${TILE_NAMES[tile.id]} を打牌`);
+      renderAll();
+      setTimeout(() => {
+        nextTurn();
+        startTurn();
+      }, 400);
+    });
+
+    // 北抜き
+    document.getElementById('btn-kita').addEventListener('click', () => {
+      if (G.turn !== 'p0' || G.busy) return;
+      kitaNuki('p0');
+      renderAll();
+    });
+
+    // 局終了モーダル
+    document.getElementById('end-next')?.addEventListener('click', nextRound);
   });
 }
