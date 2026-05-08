@@ -198,6 +198,42 @@ function renderAll() {
   renderWall();
   renderKingWall();
   updateActionButtons();
+  updateHint();
+}
+
+// ─── ヒントバー更新 ────────────────────────────
+function updateHint() {
+  const hint = document.getElementById('game-hint');
+  if (!hint) return;
+  hint.classList.remove('game__hint--cpu', 'game__hint--idle');
+
+  if (G.busy && G.turn !== 'p0') {
+    hint.textContent = `🤖 ${SEAT_LABELS[G.turn]} が考え中…`;
+    hint.classList.add('game__hint--cpu');
+    return;
+  }
+  if (G.turn !== 'p0') {
+    hint.textContent = `🤖 ${SEAT_LABELS[G.turn]} の番`;
+    hint.classList.add('game__hint--cpu');
+    return;
+  }
+  // 自分の番
+  if (G.hands.p0.length === 14) {
+    const hasKita = G.hands.p0.some(t => t.id === KITA_ID);
+    if (G.selected) {
+      hint.textContent = `🎯 ${TILE_NAMES[G.selected.id]}${G.selected.isRed ? ' (赤ドラ!)' : ''} を選択中 — 「打牌」 で捨てる`;
+    } else if (hasKita) {
+      hint.textContent = '👆 牌をタップして選択 → 「打牌」 / 北 (🀃) があるので「北抜き」 もOK';
+    } else {
+      hint.textContent = '👆 手牌から捨てる牌をタップしてください (橙色枠=今ツモった牌)';
+    }
+  } else if (G.hands.p0.length === 13) {
+    hint.textContent = '⏳ ツモ待ち…';
+    hint.classList.add('game__hint--idle');
+  } else {
+    hint.textContent = '配牌中…';
+    hint.classList.add('game__hint--idle');
+  }
 }
 
 // ─── アクションボタン制御 ──────────────────────
@@ -378,9 +414,13 @@ function startNewRound() {
   G.kitas = { p0: 0, p1: 0, p2: 0 };
   G.turn = G.oya; // 親から
   G.selected = null;
-  G.justDrawn = G.hands.p0.length === 14 ? G.hands.p0.length - 1 : null; // 親は配牌時点で14牌
+  G.justDrawn = null;
   G.busy = false;
   renderAll();
+  // ガイド終了済みなら即ターン開始 (親の14牌目 ツモ)、 未済みは ガイド終了後に開始
+  if (localStorage.getItem('omoroi-guide-done')) {
+    setTimeout(() => startTurn(), 400);
+  }
 }
 
 // ─── トースト ──────────────────────────────────
@@ -422,6 +462,10 @@ function renderGuideStep() {
 function finishGuide() {
   document.getElementById('guide-overlay').hidden = true;
   localStorage.setItem('omoroi-guide-done', '1');
+  // ガイド終了直後で 配牌済+ターン未開始 なら ターン開始
+  if (G.hands.p0 && G.hands.p0.length === 13 && G.turn === G.oya && !G.busy) {
+    setTimeout(() => startTurn(), 400);
+  }
 }
 
 // ─── ゲーム初期化 ────────────────────────────────

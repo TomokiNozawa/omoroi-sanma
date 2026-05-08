@@ -54,7 +54,29 @@ body {
   position: fixed;
   inset: 0;
   display: grid;
-  grid-template-rows: 36px 1fr 56px;
+  grid-template-rows: 36px 28px 1fr 56px;
+}
+
+.game__hint {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(76, 175, 80, 0.15);
+  color: #4caf50;
+  font-size: 12px;
+  padding: 4px 12px;
+  border-bottom: 1px solid rgba(76, 175, 80, 0.3);
+  text-align: center;
+  font-weight: 500;
+  transition: background 0.2s, color 0.2s;
+}
+.game__hint--cpu {
+  background: rgba(255, 152, 0, 0.15);
+  color: #ff9800;
+}
+.game__hint--idle {
+  background: rgba(170, 170, 200, 0.1);
+  color: #aac;
 }
 
 .game__header {
