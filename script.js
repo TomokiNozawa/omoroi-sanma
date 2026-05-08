@@ -419,6 +419,108 @@ function nextRound() {
   startNewRound();
 }
 
+// ─── サイコロ セレモニー (王牌+ドラ表示の決定) ──
+const DICE_FACES = ['⚀', '⚁', '⚂', '⚃', '⚄', '⚅'];
+const SEAT_NAMES_FOR_DICE = { p0: 'あなた', p1: '上家', p2: '下家' };
+
+async function showDiceCeremony(diceTotal, startSeat) {
+  const overlay = document.getElementById('dice-overlay');
+  const d1El = document.getElementById('dice-1');
+  const d2El = document.getElementById('dice-2');
+  const totalEl = document.getElementById('dice-total');
+  const explainEl = document.getElementById('dice-explain');
+  const counterEl = document.getElementById('dice-counter');
+  const counterNumEl = document.getElementById('dice-counter-num');
+  const okBtn = document.getElementById('dice-ok');
+  const titleEl = document.getElementById('dice-title');
+
+  if (!overlay) return;
+
+  // 初期化
+  overlay.hidden = false;
+  okBtn.hidden = true;
+  counterEl.hidden = true;
+  totalEl.textContent = '?';
+  d1El.classList.add('dice--rolling');
+  d2El.classList.add('dice--rolling');
+  titleEl.textContent = '🎲 サイコロを振ります';
+  explainEl.textContent = 'サイコロが転がっています…';
+
+  // 1.2秒間 サイコロを 転がす + 数字をランダム変動
+  const rollInterval = setInterval(() => {
+    d1El.textContent = DICE_FACES[Math.floor(Math.random() * 6)];
+    d2El.textContent = DICE_FACES[Math.floor(Math.random() * 6)];
+  }, 80);
+  await sleep(1200);
+  clearInterval(rollInterval);
+
+  // 結果決定
+  const d1 = Math.floor(Math.random() * 6) + 1;
+  const d2 = Math.floor(Math.random() * 6) + 1;
+  // ※ 引数の diceTotal は 内部用、 表示用は d1+d2 で 上書き
+  const total = d1 + d2;
+  d1El.textContent = DICE_FACES[d1 - 1];
+  d2El.textContent = DICE_FACES[d2 - 1];
+  d1El.classList.remove('dice--rolling');
+  d2El.classList.remove('dice--rolling');
+  totalEl.textContent = total;
+
+  // 起点家の決定 (反時計回り、 親から数えて total 番目: 1=自家、 2=下家、 3=上家、 4=自家...)
+  const seatByDice = ['p0', 'p2', 'p1']; // 1番目=自家、 2番目=下家、 3番目=上家 (反時計回り)
+  const finalSeat = seatByDice[(total - 1) % 3];
+  G.diceTotal = total;
+  G.startSeat = finalSeat;
+
+  await sleep(400);
+  titleEl.textContent = `合計 ${total}!`;
+  explainEl.textContent = `親 (あなた) から反時計回りに ${total} 番目 = 「${SEAT_NAMES_FOR_DICE[finalSeat]}」 の山から配牌・王牌を決めます`;
+
+  await sleep(1500);
+  // カウント アニメ
+  counterEl.hidden = false;
+  titleEl.textContent = '👉 起点家の山の右端から数えます';
+  explainEl.textContent = `「${SEAT_NAMES_FOR_DICE[finalSeat]}」 の山の右端から ${total} 牌 数えた位置で 山をカット → 右側 14牌が「王牌」、 左側が「自摸山」 になります`;
+
+  // 自家の山ハイライトでカウント (簡易: 起点家の山牌を 1から total まで光らせる)
+  const wallEl = document.getElementById(WALL_DOM_ID[finalSeat]);
+  const tiles = wallEl ? Array.from(wallEl.querySelectorAll('.wall-tile')) : [];
+  // 山の右端から数える = tiles 配列の末尾から
+  const startIdx = tiles.length - 1;
+  for (let n = 1; n <= total && n <= tiles.length; n++) {
+    counterNumEl.textContent = n;
+    const t = tiles[startIdx - n + 1];
+    if (t) {
+      t.classList.add('wall-tile--counting');
+      // 1秒後に王牌色 (紫) で残す (カット位置以降は王牌)
+      setTimeout(() => {
+        t.classList.remove('wall-tile--counting');
+        if (n === total) {
+          t.classList.add('wall-tile--cut-line');
+        } else {
+          t.classList.add('wall-tile--king');
+        }
+      }, 350);
+    }
+    await sleep(380);
+  }
+
+  await sleep(500);
+  titleEl.textContent = '✨ 王牌決定!';
+  explainEl.textContent = `カット位置 (赤) より右側の 14牌が王牌。 そのうち 1枚 (右から3枚目) を表向きにめくると ドラ表示牌 になります。`;
+  counterEl.hidden = true;
+  okBtn.hidden = false;
+}
+
+function closeDiceCeremony() {
+  document.getElementById('dice-overlay').hidden = true;
+  // 配牌アニメは省略、 即 ターン開始
+  setTimeout(() => startTurn(), 200);
+}
+
+function sleep(ms) {
+  return new Promise(r => setTimeout(r, ms));
+}
+
 // ─── 局開始 ────────────────────────────────────
 function startNewRound() {
   G.wall = buildWall();
@@ -429,14 +531,17 @@ function startNewRound() {
   G.doraIndicator = dealResult.doraIndicator;
   G.rivers = { p0: [], p1: [], p2: [] };
   G.kitas = { p0: 0, p1: 0, p2: 0 };
-  G.turn = G.oya; // 親から
+  G.turn = G.oya;
   G.selected = null;
   G.justDrawn = null;
   G.busy = false;
   renderAll();
-  // ガイド終了済みなら即ターン開始 (親の14牌目 ツモ)、 未済みは ガイド終了後に開始
+  // ガイド終了済みなら サイコロセレモニー → ターン開始
   if (localStorage.getItem('omoroi-guide-done')) {
-    setTimeout(() => startTurn(), 400);
+    setTimeout(async () => {
+      await showDiceCeremony();
+      // OK ボタンが押されるまで待つ (closeDiceCeremony で startTurn)
+    }, 400);
   }
 }
 
@@ -479,9 +584,9 @@ function renderGuideStep() {
 function finishGuide() {
   document.getElementById('guide-overlay').hidden = true;
   localStorage.setItem('omoroi-guide-done', '1');
-  // ガイド終了直後で 配牌済+ターン未開始 なら ターン開始
+  // ガイド終了直後で 配牌済+ターン未開始 なら サイコロセレモニー
   if (G.hands.p0 && G.hands.p0.length === 13 && G.turn === G.oya && !G.busy) {
-    setTimeout(() => startTurn(), 400);
+    setTimeout(() => showDiceCeremony(), 400);
   }
 }
 
@@ -557,5 +662,8 @@ if (document.getElementById('table')) {
 
     // 局終了モーダル
     document.getElementById('end-next')?.addEventListener('click', nextRound);
+
+    // サイコロセレモニー OK
+    document.getElementById('dice-ok')?.addEventListener('click', closeDiceCeremony);
   });
 }

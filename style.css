@@ -318,6 +318,104 @@ body {
   padding: 8px 16px; border-radius: 6px; cursor: pointer; font-weight: bold;
 }
 
+/* サイコロ セレモニー */
+.dice-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.85);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 110;
+}
+.dice-overlay[hidden] { display: none; }
+.dice-modal {
+  background: #143820;
+  border: 2px solid #ffeb3b;
+  border-radius: 14px;
+  padding: 24px 28px;
+  max-width: 380px;
+  width: 92%;
+  text-align: center;
+  box-shadow: 0 0 30px rgba(255,235,59,0.3);
+}
+.dice-modal__title { margin: 0 0 16px; font-size: 18px; color: #ffeb3b; }
+.dice-row {
+  display: flex; align-items: center; justify-content: center;
+  gap: 10px; margin: 16px 0;
+}
+.dice {
+  font-size: 56px;
+  width: 72px; height: 72px;
+  background: #fff;
+  color: #222;
+  border-radius: 12px;
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+}
+.dice--rolling {
+  animation: dice-roll 0.15s infinite;
+}
+@keyframes dice-roll {
+  0%   { transform: rotate(0deg)   scale(1); }
+  25%  { transform: rotate(90deg)  scale(1.1); }
+  50%  { transform: rotate(180deg) scale(1); }
+  75%  { transform: rotate(270deg) scale(1.1); }
+  100% { transform: rotate(360deg) scale(1); }
+}
+.dice-plus, .dice-equals { font-size: 28px; color: #ffeb3b; font-weight: bold; }
+.dice-total {
+  font-size: 56px;
+  color: #ffeb3b;
+  font-weight: bold;
+  min-width: 80px;
+}
+.dice-explain {
+  font-size: 13px; color: #ddd; line-height: 1.6;
+  margin: 12px 0;
+}
+.dice-counter {
+  background: rgba(255,235,59,0.15);
+  padding: 10px;
+  border-radius: 8px;
+  margin: 12px 0;
+}
+.dice-counter__label { font-size: 12px; color: #aac; margin-right: 8px; }
+.dice-counter__num {
+  font-size: 28px; color: #ffeb3b; font-weight: bold;
+  display: inline-block;
+  min-width: 50px;
+}
+.dice-ok {
+  background: #4caf50; color: #fff; border: none;
+  padding: 12px 24px; border-radius: 8px;
+  font-weight: bold; font-size: 14px; cursor: pointer;
+  margin-top: 12px;
+}
+.dice-ok[hidden] { display: none; }
+
+/* 山の カット位置ハイライト (王牌の境界) */
+.wall-tile--cut-line {
+  background: linear-gradient(180deg, #f44336 0%, #b71c1c 100%);
+  border-color: #ff8a80;
+  box-shadow: 0 0 8px #f44336;
+}
+.wall-tile--king {
+  background: linear-gradient(180deg, #9c27b0 0%, #6a1b9a 100%);
+  border-color: #ce93d8;
+}
+.wall-tile--counting {
+  background: linear-gradient(180deg, #2196f3 0%, #1565c0 100%);
+  border-color: #90caf9;
+  animation: count-flash 0.3s;
+}
+@keyframes count-flash {
+  0% { transform: scale(1.4); box-shadow: 0 0 15px #2196f3; }
+  100% { transform: scale(1); box-shadow: 0 0 4px #2196f3; }
+}
+
+/* 河の向き (雀卓風 — 各家から見て自分側に倒れる) */
+.seat--top .seat__river .tile { transform: rotate(180deg); }
+.seat--right .seat__river .tile { transform: rotate(90deg); }
+/* 自家はそのまま */
+
 /* トースト */
 .toast {
   position: fixed;

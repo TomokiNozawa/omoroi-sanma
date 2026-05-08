@@ -86,6 +86,26 @@
     </div>
   </div>
 
+  <!-- サイコロ + 王牌決定 セレモニー -->
+  <div class="dice-overlay" id="dice-overlay" hidden>
+    <div class="dice-modal">
+      <h2 class="dice-modal__title" id="dice-title">🎲 サイコロを振ります</h2>
+      <div class="dice-row">
+        <div class="dice" id="dice-1">⚀</div>
+        <span class="dice-plus">+</span>
+        <div class="dice" id="dice-2">⚀</div>
+        <span class="dice-equals">=</span>
+        <div class="dice-total" id="dice-total">?</div>
+      </div>
+      <p class="dice-explain" id="dice-explain">サイコロが転がっています…</p>
+      <div class="dice-counter" id="dice-counter" hidden>
+        <span class="dice-counter__label">数えています:</span>
+        <span class="dice-counter__num" id="dice-counter-num">1</span>
+      </div>
+      <button class="dice-ok" id="dice-ok" hidden>はじめる</button>
+    </div>
+  </div>
+
   <!-- メッセージ トースト -->
   <div class="toast" id="toast" hidden></div>
 
