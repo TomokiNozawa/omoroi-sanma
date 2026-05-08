@@ -383,6 +383,28 @@ body {
   display: inline-block;
   min-width: 50px;
 }
+.dice-mnemonic {
+  background: rgba(255,235,59,0.08);
+  border: 1px solid rgba(255,235,59,0.3);
+  padding: 10px 14px;
+  border-radius: 8px;
+  margin: 12px 0;
+  text-align: left;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #ddd;
+}
+.dice-mnemonic[hidden] { display: none; }
+.dice-mnemonic__title {
+  font-size: 13px;
+  color: #ffeb3b;
+  margin: 0 0 6px;
+  font-weight: bold;
+  text-align: center;
+}
+.dice-mnemonic__line { margin: 4px 0; color: #f0f0f0; }
+.dice-mnemonic__line b { color: #ffeb3b; font-weight: bold; }
+
 .dice-ok {
   background: #4caf50; color: #fff; border: none;
   padding: 12px 24px; border-radius: 8px;

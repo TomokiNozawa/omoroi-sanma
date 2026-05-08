@@ -421,9 +421,17 @@ function nextRound() {
 
 // ─── サイコロ セレモニー (王牌+ドラ表示の決定) ──
 const DICE_FACES = ['⚀', '⚁', '⚂', '⚃', '⚄', '⚅'];
-const SEAT_NAMES_FOR_DICE = { p0: 'あなた', p1: '上家', p2: '下家' };
+// 4家対応 (三麻でも山は対面分も用意するルール、 サイコロ目は 4家ベース で数える):
+// (total-1) % 4 → 0=自家(1,5,9), 1=下家(2,6,10), 2=対面(3,7,11), 3=上家(4,8,12)
+const SEAT_BY_DICE_4 = ['p0', 'p2', 'opposite', 'p1'];
+const SEAT_NAMES_FOR_DICE = {
+  p0: 'あなた (自家)',
+  p1: '上家',
+  p2: '下家',
+  opposite: '対面 (三麻なので席はナシ、 山だけあります)',
+};
 
-async function showDiceCeremony(diceTotal, startSeat) {
+async function showDiceCeremony() {
   const overlay = document.getElementById('dice-overlay');
   const d1El = document.getElementById('dice-1');
   const d2El = document.getElementById('dice-2');
@@ -431,6 +439,7 @@ async function showDiceCeremony(diceTotal, startSeat) {
   const explainEl = document.getElementById('dice-explain');
   const counterEl = document.getElementById('dice-counter');
   const counterNumEl = document.getElementById('dice-counter-num');
+  const mnemonicEl = document.getElementById('dice-mnemonic');
   const okBtn = document.getElementById('dice-ok');
   const titleEl = document.getElementById('dice-title');
 
@@ -440,13 +449,14 @@ async function showDiceCeremony(diceTotal, startSeat) {
   overlay.hidden = false;
   okBtn.hidden = true;
   counterEl.hidden = true;
+  if (mnemonicEl) mnemonicEl.hidden = true;
   totalEl.textContent = '?';
   d1El.classList.add('dice--rolling');
   d2El.classList.add('dice--rolling');
   titleEl.textContent = '🎲 サイコロを振ります';
   explainEl.textContent = 'サイコロが転がっています…';
 
-  // 1.2秒間 サイコロを 転がす + 数字をランダム変動
+  // 1.2秒間 ランダム面切替
   const rollInterval = setInterval(() => {
     d1El.textContent = DICE_FACES[Math.floor(Math.random() * 6)];
     d2El.textContent = DICE_FACES[Math.floor(Math.random() * 6)];
@@ -457,7 +467,6 @@ async function showDiceCeremony(diceTotal, startSeat) {
   // 結果決定
   const d1 = Math.floor(Math.random() * 6) + 1;
   const d2 = Math.floor(Math.random() * 6) + 1;
-  // ※ 引数の diceTotal は 内部用、 表示用は d1+d2 で 上書き
   const total = d1 + d2;
   d1El.textContent = DICE_FACES[d1 - 1];
   d2El.textContent = DICE_FACES[d2 - 1];
@@ -465,33 +474,34 @@ async function showDiceCeremony(diceTotal, startSeat) {
   d2El.classList.remove('dice--rolling');
   totalEl.textContent = total;
 
-  // 起点家の決定 (反時計回り、 親から数えて total 番目: 1=自家、 2=下家、 3=上家、 4=自家...)
-  const seatByDice = ['p0', 'p2', 'p1']; // 1番目=自家、 2番目=下家、 3番目=上家 (反時計回り)
-  const finalSeat = seatByDice[(total - 1) % 3];
+  // 起点家計算 (4家ベース、 (total-1)%4)
+  const seatKey = SEAT_BY_DICE_4[(total - 1) % 4];
   G.diceTotal = total;
-  G.startSeat = finalSeat;
+  G.startSeat = seatKey;
 
   await sleep(400);
   titleEl.textContent = `合計 ${total}!`;
-  explainEl.textContent = `親 (あなた) から反時計回りに ${total} 番目 = 「${SEAT_NAMES_FOR_DICE[finalSeat]}」 の山から配牌・王牌を決めます`;
+  explainEl.textContent = `親 (あなた) から反時計回りに ${total} 番目 = 「${SEAT_NAMES_FOR_DICE[seatKey]}」 の山から配牌・王牌を決めます`;
 
-  await sleep(1500);
+  // 覚え方のコツ表示
+  if (mnemonicEl) mnemonicEl.hidden = false;
+
+  await sleep(2200);
   // カウント アニメ
   counterEl.hidden = false;
   titleEl.textContent = '👉 起点家の山の右端から数えます';
-  explainEl.textContent = `「${SEAT_NAMES_FOR_DICE[finalSeat]}」 の山の右端から ${total} 牌 数えた位置で 山をカット → 右側 14牌が「王牌」、 左側が「自摸山」 になります`;
+  explainEl.textContent = `「${SEAT_NAMES_FOR_DICE[seatKey]}」 の山の右端から ${total} 牌 数えた位置で カット → 右側 14牌が「王牌」 になります`;
 
-  // 自家の山ハイライトでカウント (簡易: 起点家の山牌を 1から total まで光らせる)
-  const wallEl = document.getElementById(WALL_DOM_ID[finalSeat]);
+  // 起点家が「対面」 の場合は 三麻なので 物理的な山がない → 自家の山で代用ハイライト
+  const visualSeat = seatKey === 'opposite' ? 'p0' : seatKey;
+  const wallEl = document.getElementById(WALL_DOM_ID[visualSeat]);
   const tiles = wallEl ? Array.from(wallEl.querySelectorAll('.wall-tile')) : [];
-  // 山の右端から数える = tiles 配列の末尾から
   const startIdx = tiles.length - 1;
   for (let n = 1; n <= total && n <= tiles.length; n++) {
     counterNumEl.textContent = n;
     const t = tiles[startIdx - n + 1];
     if (t) {
       t.classList.add('wall-tile--counting');
-      // 1秒後に王牌色 (紫) で残す (カット位置以降は王牌)
       setTimeout(() => {
         t.classList.remove('wall-tile--counting');
         if (n === total) {
