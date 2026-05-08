@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <meta name="description" content="おもろい三麻 - 初心者向け 三人麻雀 Webアプリ (関西ルール / 翻数のみ / 全部赤ドラ / 北抜きあり)">
+  <meta name="theme-color" content="#0d3b1f">
+  <link rel="manifest" href="manifest.json">
+  <link rel="stylesheet" href="style.css?v=0.1.0">
+  <title>おもろい三麻 — 初心者向け三人麻雀</title>
+</head>
+<body>
+  <main class="lobby">
+    <header class="lobby__header">
+      <h1 class="lobby__title">🀄 おもろい三麻</h1>
+      <p class="lobby__subtitle">初心者向け 三人麻雀 / 関西ルール / 全部赤ドラ / 北抜きあり</p>
+    </header>
+
+    <div class="lobby__menu">
+      <a href="game.html?mode=cpu&type=hanchan" class="lobby__btn lobby__btn--primary">
+        <span class="lobby__btn-icon">🎮</span>
+        <span class="lobby__btn-label">CPU練習 (半荘)</span>
+        <span class="lobby__btn-desc">CPU 2人と 東4局+南4局</span>
+      </a>
+
+      <a href="game.html?mode=cpu&type=single" class="lobby__btn">
+        <span class="lobby__btn-icon">🎯</span>
+        <span class="lobby__btn-label">CPU練習 (1局)</span>
+        <span class="lobby__btn-desc">CPU 2人と 1局のみ</span>
+      </a>
+
+      <button class="lobby__btn lobby__btn--disabled" disabled>
+        <span class="lobby__btn-icon">👥</span>
+        <span class="lobby__btn-label">ルーム作成</span>
+        <span class="lobby__btn-desc">Phase 2 で開放予定</span>
+      </button>
+
+      <button class="lobby__btn lobby__btn--disabled" disabled>
+        <span class="lobby__btn-icon">🔗</span>
+        <span class="lobby__btn-label">ルーム参加</span>
+        <span class="lobby__btn-desc">Phase 2 で開放予定</span>
+      </button>
+    </div>
+
+    <footer class="lobby__footer">
+      <p class="lobby__version">v<span id="app-version">0.1.0</span> (Phase 1 MVP / dev)</p>
+      <p class="lobby__credit">Built with Claude Code · Hosted on Cloudflare Pages</p>
+    </footer>
+  </main>
+
+  <script src="script.js?v=0.1.0"></script>
+</body>
+</html>

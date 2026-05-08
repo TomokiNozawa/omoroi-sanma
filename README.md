@@ -1,0 +1,46 @@
+# おもろい三麻 (omoroi-sanma)
+
+初心者向け 三人麻雀 Webアプリ。 関西ルール / 翻数のみ表示 / 全部赤ドラ / 北抜きあり。
+
+## URL
+
+- **本番** (main): https://omoroi-sanma.pages.dev/ (Cloudflare Pages 連携後に有効化)
+- **dev preview** (dev): https://dev.omoroi-sanma.pages.dev/
+
+## 仕様サマリ
+
+| 項目 | 内容 |
+|---|---|
+| プレイヤー構成 | 1人練習 (CPU2) / 2人対戦+CPU1 / 3人対戦 (Phase 2) |
+| 牌構成 | 27種×4=108牌 (萬子1m/9mのみ、 中張牌なし) |
+| 赤ドラ | 5筒×4 + 5索×4 = 計8枚 |
+| 北抜き | 関西ルール (1枚=1翻、 嶺上から自摸補充) |
+| 鳴き | Phase 1 無し (門前限定) → Phase 3 解放 |
+| 局単位 | 半荘 (東4局+南4局) デフォ + 1局モード |
+| 得点計算 | 翻数のみ (符・点数は省略、 Phase 4 で追加) |
+| あがり画面 | 翻数別役一覧 + 今回 hit ハイライト |
+| 認証 | ゲスト OK (Phase 2 で Slack OAuth option) |
+| ホスティング | Cloudflare Pages (GitHub Push 自動デプロイ) |
+
+## Phase 分割
+
+| Phase | スコープ | 工数目安 |
+|---|---|---|
+| **Phase 1 (MVP)** | 配牌〜あがり / 鳴き無し / CPU2人 / 翻数のみ / オンボーディングガイド | 30-40h |
+| Phase 2 | リアルタイム対戦 (Firebase RTDB + Slack OAuth + ルーム共有) | 25-30h |
+| Phase 3 | 鳴き解放 / 役判定詳細 | 15-20h |
+| Phase 4 | 配牌からの体験 / 点数計算 / リーチ棒 | 15-20h |
+| Phase 5 | 役別ミッション / 自動招待 | 10-15h |
+
+## 開発
+
+### ブランチ運用 (Prismaera 流)
+- 通常作業は `dev` ブランチで commit/push → `dev.omoroi-sanma.pages.dev` に即反映
+- 野沢さんレビューOKを得た後 → `git checkout main && git merge dev --ff-only && git push`
+- バージョン: dev は `vX.Y.Zsuffix` (a/b/c)、 main はクリーン番号
+
+### ローカル確認
+ブラウザで `index.html` を直接開く (静的HTML/JS のみ、 ビルド不要)。
+
+## ライセンス
+個人利用。 身内 (友人/同僚) との共有が前提。

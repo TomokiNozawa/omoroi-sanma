@@ -1,0 +1,248 @@
+/* おもろい三麻 — Phase 1 MVP スタイル */
+*, *::before, *::after { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; height: 100%; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Yu Gothic", sans-serif;
+  background: #0a2818;
+  color: #f0f0f0;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
+
+/* ── ロビー画面 ───────────────────────── */
+.lobby {
+  min-height: 100vh;
+  max-width: 480px;
+  margin: 0 auto;
+  padding: 32px 20px;
+  display: flex;
+  flex-direction: column;
+}
+.lobby__header { text-align: center; margin-bottom: 32px; }
+.lobby__title { font-size: 28px; margin: 0 0 8px; letter-spacing: 0.05em; }
+.lobby__subtitle { font-size: 12px; color: #aac; margin: 0; line-height: 1.5; }
+
+.lobby__menu { display: flex; flex-direction: column; gap: 12px; flex: 1; }
+.lobby__btn {
+  display: grid;
+  grid-template-columns: 48px 1fr;
+  grid-template-rows: auto auto;
+  gap: 4px 16px;
+  padding: 16px 20px;
+  background: #143820;
+  border: 2px solid #2d6b3f;
+  border-radius: 12px;
+  color: #fff;
+  text-decoration: none;
+  font-size: 16px;
+  cursor: pointer;
+  transition: transform 0.1s, background 0.1s;
+}
+.lobby__btn:hover, .lobby__btn:active { background: #1d5530; transform: scale(0.99); }
+.lobby__btn--primary { background: #2d6b3f; border-color: #4caf50; }
+.lobby__btn--primary:hover { background: #357c4b; }
+.lobby__btn--disabled { opacity: 0.4; cursor: not-allowed; }
+.lobby__btn--disabled:hover { transform: none; background: #143820; }
+.lobby__btn-icon { grid-row: 1 / span 2; align-self: center; font-size: 32px; text-align: center; }
+.lobby__btn-label { font-weight: bold; font-size: 16px; }
+.lobby__btn-desc { font-size: 12px; color: #99b; }
+
+.lobby__footer { text-align: center; margin-top: 32px; font-size: 11px; color: #688; }
+.lobby__footer p { margin: 4px 0; }
+
+/* ── ゲーム画面 ───────────────────────── */
+.game-body { background: #0a2818; overflow: hidden; }
+.game {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  grid-template-rows: 40px 1fr 64px;
+}
+
+.game__header {
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  background: rgba(0,0,0,0.3);
+  font-size: 13px;
+}
+.game__back {
+  color: #fff;
+  text-decoration: none;
+  font-size: 20px;
+  padding: 0 12px;
+  margin-left: -8px;
+}
+.game__round { font-weight: bold; margin-left: 8px; }
+.game__remain { margin-left: auto; color: #aac; }
+.game__guide-btn {
+  background: none;
+  border: 1px solid #4a6;
+  color: #4a6;
+  padding: 4px 10px;
+  border-radius: 6px;
+  margin-left: 12px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+/* 円卓 (table) */
+.table {
+  position: relative;
+  background: radial-gradient(ellipse at center, #1a5530 0%, #0d3b1f 70%, #0a2818 100%);
+  display: grid;
+  grid-template-areas:
+    ".    top    ."
+    "left center right"
+    ".    bottom .";
+  grid-template-rows: auto 1fr auto;
+  grid-template-columns: auto 1fr auto;
+  padding: 8px;
+  gap: 4px;
+}
+
+.seat { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.seat--top    { grid-area: top;    }
+.seat--right  { grid-area: right;  flex-direction: column-reverse; }
+.seat--bottom { grid-area: bottom; }
+.seat--left   { grid-area: left;   flex-direction: column; }
+
+.seat__label { font-size: 11px; color: #aac; }
+.seat__hand {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1px;
+  justify-content: center;
+}
+.seat__river {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1px;
+  max-width: 100%;
+  padding: 4px;
+  min-height: 24px;
+}
+
+/* 牌 */
+.tile {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 40px;
+  background: linear-gradient(180deg, #fff 0%, #f0e8d8 100%);
+  border: 1px solid #8b6f47;
+  border-radius: 4px;
+  font-size: 22px;
+  color: #222;
+  font-weight: 500;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.4), inset 0 -2px 0 #c9b896;
+  cursor: pointer;
+  transition: transform 0.1s;
+  position: relative;
+}
+.tile--mine:hover { transform: translateY(-4px); }
+.tile--mine.tile--selected { transform: translateY(-8px); border-color: #4caf50; box-shadow: 0 4px 8px rgba(76,175,80,0.6); }
+.tile--back {
+  background: linear-gradient(180deg, #0e6e3e 0%, #0a4a2a 100%);
+  color: transparent;
+  border-color: #052010;
+}
+.tile--red { color: #d32f2f; }
+.tile--small { width: 22px; height: 30px; font-size: 16px; }
+.tile--mini  { width: 16px; height: 22px; font-size: 12px; }
+
+/* 中央 (山+王牌+ドラ) */
+.center {
+  grid-area: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px;
+}
+.center__wall {
+  background: rgba(0,0,0,0.4);
+  padding: 6px 14px;
+  border-radius: 8px;
+  text-align: center;
+  font-size: 12px;
+  color: #aac;
+}
+.center__wall-count { display: block; font-size: 24px; color: #fff; font-weight: bold; }
+.center__king {
+  background: rgba(0,0,0,0.3);
+  padding: 6px 10px;
+  border-radius: 8px;
+  text-align: center;
+  border: 1px dashed #888;
+}
+.center__king-label, .center__dora-label { font-size: 10px; color: #aac; }
+.center__king-tiles { display: flex; gap: 1px; margin: 4px 0; justify-content: center; }
+.center__round-info { font-size: 14px; color: #4caf50; font-weight: bold; }
+
+/* アクションバー */
+.action-bar {
+  display: flex;
+  gap: 6px;
+  padding: 10px 12px;
+  background: rgba(0,0,0,0.5);
+  align-items: center;
+  justify-content: space-around;
+}
+.action-btn {
+  flex: 1;
+  padding: 12px 4px;
+  border: 1px solid #4a6;
+  background: #143820;
+  color: #fff;
+  border-radius: 8px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.action-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+.action-btn--primary { background: #d32f2f; border-color: #f44336; }
+.action-btn:not(:disabled):active { transform: scale(0.95); }
+
+/* オンボーディング */
+.guide-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.7);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 100;
+}
+.guide-overlay[hidden] { display: none; }
+.guide-modal {
+  background: #143820;
+  border: 2px solid #4caf50;
+  border-radius: 12px;
+  padding: 20px;
+  max-width: 320px;
+  width: 90%;
+}
+.guide-modal__title { margin: 0 0 12px; font-size: 18px; color: #4caf50; }
+.guide-modal__text { font-size: 14px; line-height: 1.6; color: #ddd; }
+.guide-modal__nav { display: flex; align-items: center; gap: 8px; margin-top: 16px; }
+.guide-modal__step { font-size: 12px; color: #aac; }
+.guide-modal__skip { background: none; border: none; color: #aac; cursor: pointer; margin-left: auto; }
+.guide-modal__next {
+  background: #4caf50; color: #fff; border: none;
+  padding: 8px 16px; border-radius: 6px; cursor: pointer; font-weight: bold;
+}
+
+/* ── PC 横画面 (640px〜) ────────────── */
+@media (min-width: 640px) {
+  .tile { width: 32px; height: 46px; font-size: 26px; }
+  .tile--small { width: 26px; height: 36px; font-size: 18px; }
+  .tile--mini  { width: 20px; height: 28px; font-size: 14px; }
+  .lobby { max-width: 600px; }
+  .game__header { font-size: 14px; }
+}
+
+/* ── スマホ横向き (max-height: 500px) ── */
+@media (max-height: 500px) and (orientation: landscape) {
+  .game { grid-template-rows: 32px 1fr 56px; }
+  .tile { width: 24px; height: 34px; font-size: 18px; }
+  .seat__river { padding: 2px; }
+}

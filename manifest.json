@@ -1,0 +1,11 @@
+{
+  "name": "おもろい三麻",
+  "short_name": "三麻",
+  "description": "初心者向け 三人麻雀 Webアプリ",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0a2818",
+  "theme_color": "#0d3b1f",
+  "icons": []
+}
