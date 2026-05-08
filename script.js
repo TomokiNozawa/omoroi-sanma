@@ -181,6 +181,316 @@ function sortHand(hand) {
   return [...hand].sort((a, b) => (a.id !== b.id) ? a.id - b.id : a.copy - b.copy);
 }
 
+// ============================================================
+// 役判定 + あがり判定 モジュール
+// ============================================================
+
+// 牌IDから 種別判定
+const isYaochuId = (id) => id === 0 || id === 1 || id === 2 || id === 10 || id === 11 || id === 19 || (id >= 20 && id <= 26);
+const isJihaiId = (id) => id >= 20 && id <= 26;
+const isPinId = (id) => id >= 2 && id <= 10;
+const isSouId = (id) => id >= 11 && id <= 19;
+const isManId = (id) => id === 0 || id === 1;
+
+// 牌の数字 (1-9) を取得 (筒索のみ、 萬子は1or9、 字牌はnull)
+function tileNum(id) {
+  if (id === 0) return 1;
+  if (id === 1) return 9;
+  if (isPinId(id)) return id - 1;  // 2..10 → 1..9
+  if (isSouId(id)) return id - 10;  // 11..19 → 1..9
+  return null;  // 字牌
+}
+
+// hand → counts (id → count)
+function countTiles(hand) {
+  const c = {};
+  for (const t of hand) c[t.id] = (c[t.id] || 0) + 1;
+  return c;
+}
+
+// 順子(連続3枚)が可能な id (連続2枚先まで取れる位置)
+const SHUNTSU_HEAD_IDS = [
+  // 筒子: 1-7p (id 2-8 が頭、 8-9 を経由可)
+  2, 3, 4, 5, 6, 7, 8,
+  // 索子: 1-7s (id 11-17)
+  11, 12, 13, 14, 15, 16, 17,
+];
+
+// 残り牌をN面子に分解できるか (再帰)
+function canMakeMelds(counts, n) {
+  if (n === 0) {
+    for (const k in counts) if (counts[k] > 0) return false;
+    return true;
+  }
+  // 最小ID の牌を処理対象
+  const ids = Object.keys(counts).filter(k => counts[k] > 0).map(Number).sort((a, b) => a - b);
+  if (ids.length === 0) return n === 0;
+  const id = ids[0];
+  // 刻子
+  if (counts[id] >= 3) {
+    counts[id] -= 3;
+    if (canMakeMelds(counts, n - 1)) { counts[id] += 3; return true; }
+    counts[id] += 3;
+  }
+  // 順子 (筒/索のみ、 連続3枚)
+  if (SHUNTSU_HEAD_IDS.includes(id) && counts[id + 1] > 0 && counts[id + 2] > 0) {
+    counts[id]--; counts[id + 1]--; counts[id + 2]--;
+    if (canMakeMelds(counts, n - 1)) { counts[id]++; counts[id + 1]++; counts[id + 2]++; return true; }
+    counts[id]++; counts[id + 1]++; counts[id + 2]++;
+  }
+  return false;
+}
+
+// 標準形 (4面子+1雀頭) で あがり形か
+function isStandardWin(hand) {
+  const counts = countTiles(hand);
+  for (const idStr of Object.keys(counts)) {
+    const id = Number(idStr);
+    if (counts[id] >= 2) {
+      counts[id] -= 2;
+      if (canMakeMelds({ ...counts }, 4)) { counts[id] += 2; return true; }
+      counts[id] += 2;
+    }
+  }
+  return false;
+}
+
+// 七対子 (7種ペア)
+function isChiitoitsu(hand) {
+  if (hand.length !== 14) return false;
+  const counts = countTiles(hand);
+  let pairs = 0;
+  for (const id in counts) {
+    if (counts[id] === 2) pairs++;
+    else return false;
+  }
+  return pairs === 7;
+}
+
+// 国士無双 (1m9m1p9p1s9s + 字7種、 ペア1組)
+const KOKUSHI_IDS = [0, 1, 2, 10, 11, 19, 20, 21, 22, 23, 24, 25, 26];
+function isKokushi(hand) {
+  if (hand.length !== 14) return false;
+  const counts = countTiles(hand);
+  let hasPair = false;
+  for (const id of KOKUSHI_IDS) {
+    if (!counts[id]) return false;
+    if (counts[id] === 2) hasPair = true;
+    else if (counts[id] > 2) return false;
+  }
+  return hasPair;
+}
+
+// あがり形か
+function isWinning(hand) {
+  if (hand.length !== 14) return false;
+  if (isKokushi(hand)) return true;
+  if (isChiitoitsu(hand)) return true;
+  return isStandardWin(hand);
+}
+
+// タンヤオ (2-8 のみ、 1/9/字牌なし)
+function isTanyao(hand) {
+  return hand.every(t => !isYaochuId(t.id));
+}
+
+// 混一色 (1色+字牌)、 純の字牌のみ・1色のみは除外
+function isHonitsu(hand) {
+  let hasMan = false, hasPin = false, hasSou = false, hasJi = false;
+  for (const t of hand) {
+    if (isManId(t.id)) hasMan = true;
+    else if (isPinId(t.id)) hasPin = true;
+    else if (isSouId(t.id)) hasSou = true;
+    else if (isJihaiId(t.id)) hasJi = true;
+  }
+  const colorCount = (hasMan ? 1 : 0) + (hasPin ? 1 : 0) + (hasSou ? 1 : 0);
+  return colorCount === 1 && hasJi;
+}
+
+// 清一色 (1色のみ、 字牌なし)
+function isChinitsu(hand) {
+  let hasMan = false, hasPin = false, hasSou = false, hasJi = false;
+  for (const t of hand) {
+    if (isManId(t.id)) hasMan = true;
+    else if (isPinId(t.id)) hasPin = true;
+    else if (isSouId(t.id)) hasSou = true;
+    else if (isJihaiId(t.id)) hasJi = true;
+  }
+  if (hasJi) return false;
+  const colorCount = (hasMan ? 1 : 0) + (hasPin ? 1 : 0) + (hasSou ? 1 : 0);
+  return colorCount === 1;
+}
+
+// 対々和 (4刻子+1雀頭、 順子なし) — 標準形あがり前提
+function isToitoi(hand) {
+  const counts = countTiles(hand);
+  let kotsu = 0, pair = 0;
+  for (const id in counts) {
+    if (counts[id] === 3) kotsu++;
+    else if (counts[id] === 2) pair++;
+    else return false;
+  }
+  return kotsu === 4 && pair === 1;
+}
+
+// 三暗刻 (3つの暗刻、 自摸限定で簡略化)
+function countAnkoCount(hand) {
+  const counts = countTiles(hand);
+  let n = 0;
+  for (const id in counts) if (counts[id] === 3 || counts[id] === 4) n++;
+  return n;
+}
+
+// 役牌 (三元牌、 場風東、 自風東 — 親なら自風東で 重複なら2翻)
+const SAN_GEN_IDS = [24, 25, 26]; // 白發中
+function countYakuhai(hand, context) {
+  const counts = countTiles(hand);
+  const yakus = [];
+  for (const id of SAN_GEN_IDS) {
+    if ((counts[id] || 0) >= 3) {
+      yakus.push({ name: TILE_NAMES[id], han: 1 });
+    }
+  }
+  // 場風 = 東 (id=20) を簡略 (東場のみ実装、 南場は省略)
+  // 自風 = 親=東 (id=20) — 三麻だが 簡略
+  if ((counts[20] || 0) >= 3) {
+    if (context.round && context.round.startsWith('東')) {
+      yakus.push({ name: '場風 東', han: 1 });
+    }
+    // 親なら自風東
+    if (context.isOya) {
+      yakus.push({ name: '自風 東', han: 1 });
+    }
+  }
+  return yakus;
+}
+
+// 役満系 (簡易): 四暗刻、 字一色、 緑一色、 清老頭、 大三元、 国士無双
+function checkYakuman(hand, context) {
+  const ymList = [];
+  if (isKokushi(hand)) ymList.push({ name: '国士無双', han: 13 });
+  // 四暗刻 (4暗刻+雀頭、 ツモ限定で簡略)
+  if (context.isTsumo) {
+    const counts = countTiles(hand);
+    let ankoCount = 0, pair = 0;
+    let valid = true;
+    for (const id in counts) {
+      if (counts[id] === 3) ankoCount++;
+      else if (counts[id] === 2) pair++;
+      else { valid = false; break; }
+    }
+    if (valid && ankoCount === 4 && pair === 1) {
+      ymList.push({ name: '四暗刻', han: 13 });
+    }
+  }
+  // 字一色 (全部字牌)
+  if (hand.every(t => isJihaiId(t.id))) ymList.push({ name: '字一色', han: 13 });
+  // 清老頭 (1m/9m/1p/9p/1s/9s のみ)
+  const RYOUTOU_IDS = new Set([0, 1, 2, 10, 11, 19]);
+  if (hand.every(t => RYOUTOU_IDS.has(t.id))) ymList.push({ name: '清老頭', han: 13 });
+  // 緑一色 (索子 2,3,4,6,8 + 發 のみ)
+  const RYUUIISO_IDS = new Set([12, 13, 14, 16, 18, 25]);
+  if (hand.every(t => RYUUIISO_IDS.has(t.id))) ymList.push({ name: '緑一色', han: 13 });
+  // 大三元 (白發中 全部刻子)
+  const counts = countTiles(hand);
+  if ((counts[24] || 0) >= 3 && (counts[25] || 0) >= 3 && (counts[26] || 0) >= 3) {
+    ymList.push({ name: '大三元', han: 13 });
+  }
+  return ymList;
+}
+
+// ドラ計算 (表示牌の次が ドラ)
+function nextTileId(id) {
+  if (id === 0) return 1;  // 1m → 9m? 三麻流派、 簡略: 1m→9m
+  if (id === 1) return 0;  // 9m → 1m
+  if (isPinId(id)) return id === 10 ? 2 : id + 1;  // 9p → 1p
+  if (isSouId(id)) return id === 19 ? 11 : id + 1;
+  // 字牌: 東南西北 / 白發中
+  if (id === 20) return 21; // 東→南
+  if (id === 21) return 22; // 南→西
+  if (id === 22) return 23; // 西→北
+  if (id === 23) return 20; // 北→東
+  if (id === 24) return 25; // 白→發
+  if (id === 25) return 26; // 發→中
+  if (id === 26) return 24; // 中→白
+  return null;
+}
+
+function countDora(hand, doraIndicator) {
+  if (!doraIndicator) return 0;
+  const doraId = nextTileId(doraIndicator.id);
+  return hand.filter(t => t.id === doraId).length;
+}
+
+// ─── 役判定 メイン ─────────────────────────
+function calcYaku(hand, context) {
+  // context: { isTsumo, isRiichi, isOya, doraIndicator, kitas, round }
+  const yakuList = [];
+  let han = 0;
+  let isYakuman = false;
+
+  if (!isWinning(hand)) {
+    return { yakuList: [], han: 0, isYakuman: false, error: 'あがり形ではありません' };
+  }
+
+  // 役満チェック (優先)
+  const yms = checkYakuman(hand, context);
+  if (yms.length > 0) {
+    for (const ym of yms) yakuList.push(ym);
+    return { yakuList, han: 13 * yms.length, isYakuman: true };
+  }
+
+  // 七対子チェック
+  if (isChiitoitsu(hand)) {
+    yakuList.push({ name: '七対子', han: 2 });
+    han += 2;
+  } else {
+    // 標準形の役
+    if (isToitoi(hand)) { yakuList.push({ name: '対々和', han: 2 }); han += 2; }
+    const ankoCount = countAnkoCount(hand);
+    if (ankoCount >= 3 && context.isTsumo) { yakuList.push({ name: '三暗刻', han: 2 }); han += 2; }
+    // 役牌
+    const yakuhai = countYakuhai(hand, context);
+    for (const y of yakuhai) { yakuList.push(y); han += y.han; }
+  }
+
+  // タンヤオ・混一色・清一色 (両形共通)
+  if (isTanyao(hand)) { yakuList.push({ name: 'タンヤオ', han: 1 }); han += 1; }
+  if (isHonitsu(hand)) { yakuList.push({ name: '混一色', han: 3 }); han += 3; }
+  if (isChinitsu(hand)) { yakuList.push({ name: '清一色', han: 6 }); han += 6; }
+
+  // 立直・門前清自摸
+  if (context.isRiichi) { yakuList.push({ name: '立直', han: 1 }); han += 1; }
+  if (context.isTsumo) { yakuList.push({ name: '門前清自摸和', han: 1 }); han += 1; }
+
+  // ドラ計算 (表ドラ + 赤ドラ + 北ドラ)
+  const doraCount = countDora(hand, context.doraIndicator);
+  if (doraCount > 0) { yakuList.push({ name: 'ドラ', han: doraCount }); han += doraCount; }
+  const akaCount = hand.filter(t => t.isRed).length;
+  if (akaCount > 0) { yakuList.push({ name: '赤ドラ', han: akaCount }); han += akaCount; }
+  if (context.kitas > 0) { yakuList.push({ name: `北抜き×${context.kitas}`, han: context.kitas }); han += context.kitas; }
+
+  // 役なし? (役牌・タンヤオ等 1翻役以上が必要、 ドラ・北だけでは役なし)
+  // ただし簡略化: 1翻以上あれば OK とする
+  const yakuOnly = yakuList.filter(y => !y.name.startsWith('ドラ') && !y.name.startsWith('赤ドラ') && !y.name.startsWith('北抜き'));
+  if (yakuOnly.length === 0) {
+    return { yakuList, han, isYakuman: false, error: '役なし (ドラ・北抜きだけではあがれません)' };
+  }
+
+  return { yakuList, han, isYakuman: false };
+}
+
+// ─── 翻数 → 名前 ─────────────────────────
+function hanToTier(han, isYakuman) {
+  if (isYakuman) return '役満';
+  if (han >= 13) return '数え役満';
+  if (han >= 11) return '三倍満';
+  if (han >= 8) return '倍満';
+  if (han >= 6) return '跳満';
+  if (han >= 5) return '満貫';
+  return `${han}翻`;
+}
+
 // ─── 描画: 手牌 ────────────────────────────────
 function renderHand(seat) {
   const container = document.getElementById(`hand-${seat}`);
@@ -405,8 +715,19 @@ function updateActionButtons() {
   document.getElementById('btn-discard').disabled = !(myTurn && has14 && G.selected);
   const hasKita = G.hands.bottom.some(t => t.id === KITA_ID);
   document.getElementById('btn-kita').disabled = !(myTurn && has14 && hasKita);
-  document.getElementById('btn-tsumo').disabled = true;  // 役判定実装まで
-  document.getElementById('btn-riichi').disabled = true;
+  // ツモ判定: 14牌でかつ あがり形 + 役あり
+  let canTsumo = false;
+  if (myTurn && has14) {
+    if (isWinning(G.hands.bottom)) {
+      const result = calcYaku(G.hands.bottom, {
+        isTsumo: true, isRiichi: G.isRiichi || false, isOya: G.turn === G.oya,
+        doraIndicator: G.doraIndicator, kitas: G.kitas.bottom, round: G.round,
+      });
+      canTsumo = result.han > 0 || result.isYakuman;
+    }
+  }
+  document.getElementById('btn-tsumo').disabled = !canTsumo;
+  document.getElementById('btn-riichi').disabled = true;  // Phase 1.6 で実装
 }
 
 function onMyHandClick(tile) {
@@ -519,9 +840,68 @@ function endRound(reason) {
   document.getElementById('end-title').textContent = reason;
   document.getElementById('end-text').textContent =
     reason === '流局'
-      ? `山が尽きました (${G.round}局 終了)。 Phase 1 ではあがり判定 未実装。`
+      ? `山が尽きました (${G.round}局 終了)。`
       : `${G.round}局 終了。`;
   document.getElementById('end-overlay').hidden = false;
+}
+
+// ─── あがりモーダル (翻数表示) ─────────────────
+function showWinModal(seat, hand, context, result) {
+  const overlay = document.getElementById('end-overlay');
+  const titleEl = document.getElementById('end-title');
+  const textEl = document.getElementById('end-text');
+  if (!overlay || !titleEl || !textEl) return;
+
+  const whoLabel = (seat === 'bottom') ? 'あなた' : SEAT_LABEL_BASE[seat];
+  const winType = context.isTsumo ? 'ツモ' : 'ロン';
+  const tier = hanToTier(result.han, result.isYakuman);
+  titleEl.textContent = `🎉 ${whoLabel}の${winType}あがり! ${tier}`;
+
+  // 翻数別 役一覧 + 今回の hit ハイライト
+  const allYaku = [
+    { name: '立直', han: 1, hint: 'リーチ宣言' },
+    { name: '門前清自摸和', han: 1, hint: '門前ツモ' },
+    { name: 'タンヤオ', han: 1, hint: '2-8のみ' },
+    { name: '役牌', han: 1, hint: '三元/場風/自風' },
+    { name: '北抜き', han: 1, hint: '抜くたび1翻' },
+    { name: '赤ドラ', han: 1, hint: '5p/5s 全枚' },
+    { name: 'ドラ', han: 1, hint: '表示牌の次' },
+    { name: '七対子', han: 2, hint: '7組ペア' },
+    { name: '対々和', han: 2, hint: '4刻子+雀頭' },
+    { name: '三暗刻', han: 2, hint: '暗刻3つ' },
+    { name: '混一色', han: 3, hint: '1色+字牌' },
+    { name: '清一色', han: 6, hint: '1色のみ' },
+    { name: '国士無双', han: 13, hint: '役満' },
+    { name: '四暗刻', han: 13, hint: '役満' },
+    { name: '大三元', han: 13, hint: '役満' },
+    { name: '字一色', han: 13, hint: '役満' },
+    { name: '緑一色', han: 13, hint: '役満' },
+    { name: '清老頭', han: 13, hint: '役満' },
+  ];
+  const hitNames = new Set(result.yakuList.map(y => y.name.replace(/×\d+$/, '').replace(/^北抜き.*/, '北抜き')));
+
+  const tierGroups = {};
+  for (const y of allYaku) {
+    const key = y.han >= 13 ? '役満' : `${y.han}翻`;
+    if (!tierGroups[key]) tierGroups[key] = [];
+    tierGroups[key].push(y);
+  }
+  let html = '<div style="text-align:left; font-size:11px; max-height:50vh; overflow-y:auto;">';
+  for (const tierName of Object.keys(tierGroups)) {
+    html += `<div style="margin:4px 0;"><b style="color:#ffeb3b;">${tierName}</b>: `;
+    html += tierGroups[tierName].map(y => {
+      const isHit = hitNames.has(y.name) || result.yakuList.some(r => r.name.includes(y.name));
+      return `<span style="margin:0 4px; ${isHit ? 'background:#ffeb3b; color:#000; padding:1px 4px; border-radius:3px; font-weight:bold;' : 'opacity:0.5;'}">${y.name}</span>`;
+    }).join(' ');
+    html += '</div>';
+  }
+  html += '</div>';
+  html += '<div style="margin-top:10px; padding:8px; background:rgba(255,235,59,0.15); border-radius:6px; text-align:left;">';
+  html += '<b style="color:#ffeb3b;">今回の役 (合計' + (result.isYakuman ? '役満' : `${result.han}翻 = ${tier}`) + '):</b><br>';
+  html += result.yakuList.map(y => `・${y.name} ${y.han}翻`).join('<br>');
+  html += '</div>';
+  textEl.innerHTML = html;
+  overlay.hidden = false;
 }
 
 // 三麻 半荘 = 東3+南3 = 6局
@@ -780,6 +1160,18 @@ if (document.getElementById('table')) {
       if (G.turn !== 'bottom' || G.busy) return;
       kitaNuki('bottom');
       renderAll();
+    });
+    document.getElementById('btn-tsumo').addEventListener('click', () => {
+      if (G.turn !== 'bottom' || G.busy) return;
+      if (!isWinning(G.hands.bottom)) return;
+      const ctx = { isTsumo: true, isRiichi: G.isRiichi || false, isOya: G.turn === G.oya,
+                    doraIndicator: G.doraIndicator, kitas: G.kitas.bottom, round: G.round };
+      const result = calcYaku(G.hands.bottom, ctx);
+      if (result.han === 0 && !result.isYakuman) {
+        toast('役なし — 役なしではあがれません');
+        return;
+      }
+      showWinModal('bottom', G.hands.bottom, ctx, result);
     });
     document.getElementById('end-next')?.addEventListener('click', nextRound);
     document.getElementById('dice-ok')?.addEventListener('click', closeDiceCeremony);
