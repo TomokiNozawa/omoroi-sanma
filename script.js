@@ -69,6 +69,8 @@ const G = {
   scores: { bottom: 35000, right: 35000, top: 35000, left: 35000 },
   // ロン保留 (他家打牌直後に 自家があがれる場合 設定)
   pendingRon: null,  // { fromSeat, tile } or null
+  // リーチ宣言直後の打牌マーク (= 横向きにする)
+  justRiichiDeclared: null,  // seat or null
 };
 
 // ─── 牌生成 + シャッフル ───────────────────────
@@ -124,13 +126,20 @@ function applyDice(walls, diceTotal, oyaSeat = 'bottom') {
   const ccw = ccwFrom(startSeat);
   const X = diceTotal;
 
-  // 起点家視点の 通し番号 (1-based、 1〜13 = 起点家、 0以下 = 隣家にまたがる)
-  // 隣家へまたがる時、 g=0 → 隣家13幢目、 g=-1 → 隣家12幢目、 ...
-  // ※ 14単独 (douIdx0=13) は **常にスキップ**、 13幢目から 反時計回り次家へ 連続
+  // 起点家視点の 通し番号 (1-based、 1〜13 = 起点家、 0以下 = 反時計回り次家へまたがる)
+  // 物理接続: 起点家1幢目 (山右端) ←→ ccw[1] 14幢目 (反時計回り次家の山左端=単独だが 単独はskipして13幢目)
+  //          起点家13幢目 (山左端ペア) ←→ ccw[3] 1幢目 (時計回り次家の山右端)
+  // ※ 14単独 (douIdx0=13) は 王牌・ドラ計算から 完全 skip
   function gToPos(g) {
     if (g >= 1 && g <= 13) return { seat: startSeat, douIdx0: g - 1 };
-    if (g <= 0) return { seat: ccw[1], douIdx0: 13 + g - 1 };  // g=0→12 (=隣家13幢目)
-    if (g >= 14) return { seat: ccw[3], douIdx0: g - 14 - 1 };  // g=14→-1 (= 範囲外)、 通常は起こらない
+    if (g <= 0) {
+      // 起点家右端より右 = ccw[1] (反時計回り次家) の 大きい douIdx 側 (山左端寄り)、 14単独skip
+      return { seat: ccw[1], douIdx0: 12 + g };  // g=0→12 (=13幢目), g=-1→11 (=12幢目)
+    }
+    if (g >= 14) {
+      // 起点家左端ペアより左 = ccw[3] (時計回り次家) の 小さい douIdx 側 (山右端寄り)
+      return { seat: ccw[3], douIdx0: g - 14 };  // g=14→0 (=1幢目)
+    }
     return null;
   }
 
@@ -163,14 +172,17 @@ function applyDice(walls, diceTotal, oyaSeat = 'bottom') {
     drawTiles.push(walls[seat][douToArrIdx(douIdx0, 'top')]);
     if (douIdx0 !== 13) drawTiles.push(walls[seat][douToArrIdx(douIdx0, 'bot')]);
   }
-  // (1) 起点家: (X+1)幢目 〜 13幢目 + 14単独
+  // ツモ取り順 (= 山が消費される順): 起点家のカット位置左隣 から 「物理接続」 順に 進む
+  // 「ツモる人 反時計、 牌は時計回り」 = 山取り順は 起点家 → ccw[3] (時計回り次家) → ccw[2] → ccw[1] → 起点家右半分
+  // 各幢内は 上→下 (14単独は上のみ)
+  // (1) 起点家: (X+1)幢目 〜 14単独
   for (let d = X; d <= 13; d++) addAllExceptKing(startSeat, d);
-  // (2) ccw[1] (隣家): 1幢目 〜 14単独
-  for (let d = 0; d <= 13; d++) addAllExceptKing(ccw[1], d);
-  // (3) ccw[2]: 同
-  for (let d = 0; d <= 13; d++) addAllExceptKing(ccw[2], d);
-  // (4) ccw[3]: 同
+  // (2) ccw[3] (時計回り次家、 物理接続: 起点家14単独 → ccw[3] 1幢目)
   for (let d = 0; d <= 13; d++) addAllExceptKing(ccw[3], d);
+  // (3) ccw[2]
+  for (let d = 0; d <= 13; d++) addAllExceptKing(ccw[2], d);
+  // (4) ccw[1] (= 起点家の 反時計回り 次家、 = 起点家1幢目と物理接続)
+  for (let d = 0; d <= 13; d++) addAllExceptKing(ccw[1], d);
   // (5) 起点家: 1幢目 〜 X幢目 (王牌外の残り)
   for (let d = 0; d <= X - 1; d++) addAllExceptKing(startSeat, d);
 
@@ -206,6 +218,7 @@ function createTileEl(tile, opts = {}) {
   if (opts.river) el.classList.add('tile--river');
   if (opts.mine)  el.classList.add('tile--mine');
   if (opts.justDrawn) el.classList.add('tile--just-drawn');
+  if (tile && tile.isRiichiDeclared) el.classList.add('tile--riichi-dec');
   if (opts.back) {
     el.style.backgroundImage = `url('assets/${encodeURIComponent(TILE_BACK_IMG)}')`;
     el.title = '伏せ牌';
@@ -802,18 +815,20 @@ function updateActionButtons() {
   document.getElementById('btn-discard').disabled = !(myTurn && has14 && G.selected);
   const hasKita = G.hands.bottom.some(t => t.id === KITA_ID);
   document.getElementById('btn-kita').disabled = !(myTurn && has14 && hasKita);
-  // ツモ判定: 14牌でかつ あがり形 + 役あり
+  // ツモ判定: 14牌でかつ あがり形 + 役あり (ドラ・北だけはNG)
   let canTsumo = false;
   if (myTurn && has14) {
     if (isWinning(G.hands.bottom)) {
       const result = calcYaku(G.hands.bottom, {
         isTsumo: true, isRiichi: G.isRiichi.bottom, isOya: G.turn === G.oya,
         doraIndicator: G.doraIndicator, kitas: G.kitas.bottom, round: G.round,
+        isIppatsu: G.riichiTurnsLeft.bottom > 0,
       });
-      canTsumo = result.han > 0 || result.isYakuman;
+      canTsumo = !result.error && (result.han > 0 || result.isYakuman);
     }
   }
-  document.getElementById('btn-tsumo').disabled = !canTsumo;
+  const tsumoBtn = document.getElementById('btn-tsumo');
+  if (tsumoBtn) tsumoBtn.disabled = !canTsumo;
   // ロン判定: pendingRon あれば active
   const ronBtn = document.getElementById('btn-ron');
   if (ronBtn) ronBtn.disabled = !G.pendingRon;
@@ -855,7 +870,8 @@ function checkRonForSeat(seat, fromSeat, tile) {
     isIppatsu: G.riichiTurnsLeft[seat] > 0,
   };
   const result = calcYaku(test, ctx);
-  if (result.han === 0 && !result.isYakuman) return null;
+  // 役なし (= error あり、 ドラ・赤・北だけは 役にならない) はロン不可
+  if (result.error || (result.han === 0 && !result.isYakuman)) return null;
   return { result, ctx };
 }
 function checkRonForBottom(fromSeat, tile) {
@@ -865,6 +881,11 @@ function checkRonForBottom(fromSeat, tile) {
 function onMyHandClick(tile) {
   if (G.turn !== 'bottom' || G.busy) return;
   if (G.hands.bottom.length !== 14) return;
+  // リーチ後は 手牌操作禁止 (自動でツモ牌が捨てられる)
+  if (G.isRiichi.bottom) {
+    toast('リーチ後は 手牌を変更できません');
+    return;
+  }
   G.selected = (G.selected === tile) ? null : tile;
   renderHand('bottom');
   updateActionButtons();
@@ -884,6 +905,11 @@ function discardTile(seat, tile) {
   const idx = G.hands[seat].indexOf(tile);
   if (idx < 0) return false;
   G.hands[seat].splice(idx, 1);
+  // リーチ宣言直後の打牌は 横向きマーク
+  if (G.justRiichiDeclared === seat) {
+    tile.isRiichiDeclared = true;
+    G.justRiichiDeclared = null;
+  }
   G.rivers[seat].push(tile);
   if (seat === 'bottom') {
     G.selected = null;
@@ -950,6 +976,31 @@ function startTurn() {
   if (G.turn === 'bottom') {
     drawTile('bottom');
     renderAll();
+    // リーチ後 自家: ツモあがり可能なら ツモボタン active、 そうでなければ ツモ牌を 自動捨て
+    if (G.isRiichi.bottom && G.hands.bottom.length === 14) {
+      const justDrawnTile = G.hands.bottom[G.justDrawn];
+      let canTsumoNow = false;
+      if (isWinning(G.hands.bottom)) {
+        const result = calcYaku(G.hands.bottom, {
+          isTsumo: true, isRiichi: true, isOya: G.oya === 'bottom',
+          doraIndicator: G.doraIndicator, kitas: G.kitas.bottom, round: G.round,
+          isIppatsu: G.riichiTurnsLeft.bottom > 0,
+        });
+        canTsumoNow = !result.error && (result.han > 0 || result.isYakuman);
+      }
+      if (!canTsumoNow) {
+        // 自動でツモ牌を 捨てる (リーチ後 待ち変更不可)
+        G.busy = true;
+        setTimeout(() => {
+          discardTile('bottom', justDrawnTile);
+          toast(`(リーチ自動打牌) ${TILE_NAMES[justDrawnTile.id]}`);
+          renderAll();
+          if (G.pendingRon) return;  // 自家がロン張られたら 待つ
+          G.busy = false;
+          setTimeout(() => { nextTurn(); startTurn(); }, 350);
+        }, 700);
+      }
+    }
   } else {
     G.busy = true;
     renderAll();
@@ -960,6 +1011,11 @@ function startTurn() {
 function cpuPlay(seat) {
   drawTile(seat);
   renderHand(seat);
+  // リーチ後の CPU は ツモ牌固定 (待ち変更不可)
+  if (G.isRiichi[seat]) {
+    setTimeout(() => cpuDiscard(seat, true), 500);  // forceTsumoTile=true
+    return;
+  }
   // CPU リーチ判定 (14牌時、 未リーチ、 1000点以上、 テンパイ、 70%確率)
   if (G.hands[seat].length === 14 && !G.isRiichi[seat]
       && G.scores[seat] >= 1000 && canDeclareRiichi(G.hands[seat])) {
@@ -967,6 +1023,7 @@ function cpuPlay(seat) {
       G.isRiichi[seat] = true;
       G.riichiTurnsLeft[seat] = 4;
       G.scores[seat] -= 1000;
+      G.justRiichiDeclared = seat;  // 次の打牌が リーチ宣言牌
       toast(`${SEAT_LABEL_BASE[seat]} リーチ! (-1000点)`);
     }
   }
@@ -982,8 +1039,8 @@ function cpuPlay(seat) {
   }
 }
 
-function cpuDiscard(seat) {
-  // CPU が ツモあがり 可能か (簡略: 役あり前提)
+function cpuDiscard(seat, forceTsumoTile = false) {
+  // CPU が ツモあがり 可能か (役なしはあがれない)
   if (G.hands[seat].length === 14 && isWinning(G.hands[seat])) {
     const ctx = {
       isTsumo: true, isRiichi: G.isRiichi[seat], isOya: G.oya === seat,
@@ -991,12 +1048,23 @@ function cpuDiscard(seat) {
       isIppatsu: G.riichiTurnsLeft[seat] > 0,
     };
     const result = calcYaku(G.hands[seat], ctx);
-    if (result.han > 0 || result.isYakuman) {
+    if (!result.error && (result.han > 0 || result.isYakuman)) {
       toast(`${SEAT_LABEL_BASE[seat]} ツモ!`);
       showWinModal(seat, G.hands[seat], ctx, result);
       G.busy = false;
       return;
     }
+  }
+  // リーチ後 CPU: ツモ牌 (= 末尾) を 強制捨て
+  if (forceTsumoTile) {
+    const tile = G.hands[seat][G.hands[seat].length - 1];
+    discardTile(seat, tile);
+    toast(`${SEAT_LABEL_BASE[seat]} (リーチ自動) ${TILE_NAMES[tile.id]}`);
+    renderAll();
+    if (G.pendingRon) return;
+    G.busy = false;
+    setTimeout(() => { nextTurn(); startTurn(); }, 350);
+    return;
   }
   // 通常打牌
   const counts = {};
@@ -1201,6 +1269,7 @@ function startNewRound() {
   G.isRiichi = { bottom: false, right: false, top: false, left: false };
   G.riichiTurnsLeft = { bottom: 0, right: 0, top: 0, left: 0 };
   G.pendingRon = null;
+  G.justRiichiDeclared = null;
   renderAll();
 
   if (localStorage.getItem('omoroi-guide-done')) {
@@ -1452,7 +1521,8 @@ if (document.getElementById('table')) {
       G.isRiichi.bottom = true;
       G.riichiTurnsLeft.bottom = 4;  // 一発: 自分含めて 4ターン以内
       G.scores.bottom -= 1000;
-      toast('リーチ! (-1000点) — 1巡以内ツモ/ロンで一発+1翻');
+      G.justRiichiDeclared = 'bottom';  // 次の打牌が リーチ宣言牌 (横向き)
+      toast('リーチ! (-1000点) — 牌タップ→「打牌」 で 宣言牌横向き');
       renderAll();
     });
     document.getElementById('end-next')?.addEventListener('click', nextRound);

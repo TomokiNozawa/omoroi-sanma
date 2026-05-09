@@ -138,7 +138,7 @@ body {
   transform: translateX(-50%);
   flex-direction: column-reverse;
 }
-.seat__hand--bottom { display: flex; flex-direction: row; flex-wrap: wrap; gap: 1px; max-width: 96vw; justify-content: center; }
+.seat__hand--bottom { display: flex; flex-direction: row; flex-wrap: nowrap; gap: 1px; max-width: 100vw; justify-content: center; overflow-x: auto; padding: 0 4px; }
 .seat__wall--bottom { display: grid; grid-template-columns: repeat(14, auto); grid-template-rows: auto auto; gap: 1px; }
 /* 対面: 横長 14列×2段、 ただし top dan は 視覚的に画面下側 (卓中央寄り) */
 .seat__wall--top { display: grid; grid-template-columns: repeat(14, auto); grid-template-rows: auto auto; gap: 1px; }
@@ -231,7 +231,7 @@ body {
 /* ── 牌 (画像) ─── */
 .tile {
   display: inline-block;
-  width: 24px; height: 32px;
+  width: 22px; height: 30px;
   border-radius: 3px;
   transition: transform 0.1s;
   flex-shrink: 0;
@@ -248,6 +248,11 @@ body {
 .tile--small { width: 18px; height: 24px; }
 .tile--mini  { width: 14px; height: 19px; }
 .tile--river { width: 16px; height: 22px; }
+/* リーチ宣言牌 = 横向き (90deg)、 各家の 河 内で 適切に 回転 */
+.tile--riichi-dec { transform: rotate(90deg) !important; }
+.seat__river--top .tile--riichi-dec { transform: rotate(180deg) rotate(90deg) !important; }
+.seat__river--left .tile--riichi-dec { transform: rotate(90deg) rotate(90deg) !important; }
+.seat__river--right .tile--riichi-dec { transform: rotate(-90deg) rotate(90deg) !important; }
 
 /* ── アクションバー ── */
 .action-bar { display: flex; gap: 4px; padding: 6px 8px; background: rgba(0,0,0,0.55); align-items: center; justify-content: space-around; }
