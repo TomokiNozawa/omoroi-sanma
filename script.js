@@ -49,8 +49,12 @@ const G = {
   kingTiles: [],
   doraIndicator: null,
   startSeat: null,
-  cutPosInStart: 0,
+  cutPosInStart: 0,  // = サイコロ目X (= カット位置 = 該当家山の右端からX幢目)
   diceTotal: 0,
+  doraSeat: null,
+  doraDouIdx: -1,
+  kingDouInStart: 0,  // 起点家側の王牌幢数 (1〜7)
+  kingDouInNext: 0,   // 隣家側の王牌幢数 (0〜6、 サイコロ目<8 の場合)
   hands: { bottom: [], right: [], top: [], left: [] },
   rivers: { bottom: [], right: [], top: [], left: [] },
   kitas: { bottom: 0, right: 0, top: 0, left: 0 },
@@ -82,62 +86,112 @@ function buildAllTiles() {
   return all;
 }
 
-// ─── 4面均等で 27牌ずつ 配置 ────────────────────
+// ─── 4面均等で 27牌ずつ 「幢」 ベースに 配置 ─────────
+// 各家 = 14幢 (= 上段14 + 下段13、 14幢目 (左端) のみ単独上段、 1〜13幢目は 上下2牌セット)
+// walls[seat] は 27要素の配列、 index = 「右端から左へ、 各幢 上→下」 順
+//   index 0 = 1幢目(右端)上段、 index 1 = 1幢目下段、 index 2 = 2幢目上段、 ...
+//   index 24 = 13幢目上段、 index 25 = 13幢目下段、 index 26 = 14幢目(左端)上段単独
+// ヘルパー: ある幢index (0-13) と 段 (top/bot) から 配列 index を求める / 逆
+function douToArrIdx(douIdx, dan) {
+  if (douIdx === 13) return 26;  // 14幢目 (左端) は 上段単独
+  return douIdx * 2 + (dan === 'top' ? 0 : 1);
+}
+function buildWallSlice(allTiles, start) {
+  return allTiles.slice(start, start + 27);
+}
 function buildWalls(allTiles) {
   return {
-    bottom: allTiles.slice(0, 27),
-    right:  allTiles.slice(27, 54),
-    top:    allTiles.slice(54, 81),
-    left:   allTiles.slice(81, 108),
+    bottom: buildWallSlice(allTiles, 0),
+    right:  buildWallSlice(allTiles, 27),
+    top:    buildWallSlice(allTiles, 54),
+    left:   buildWallSlice(allTiles, 81),
   };
 }
 
 // ─── サイコロを振って カット位置 + 王牌 + 自摸山を決定 ──
-function applyDice(walls, diceTotal) {
-  // 起点家 = (diceTotal - 1) % 4
-  const startSeat = ALL_SEATS[(diceTotal - 1) % 4];
+// 麻雀正規ルール (mahjong-joutatsu.com 参考):
+//   1) サイコロ目X → 起点家 = 親から反時計回りにX人目 (本実装は 4面均等なので X-1)
+//   2) カット位置 = 起点家の山の **右端から X幢目を切り離す**
+//   3) 王牌 = カットの **右側 7幢 = 14牌** (= 山の右端から 1〜7幢目)
+//      → サイコロ目X<8 の場合、 王牌が 隣家 (反時計回り次家) にまたがる
+//   4) ドラ表示牌 = 王牌の **左から3つ目、 上段** = 山の右端から (X-3)幢目の上段
+//   5) 自摸山 = カットの 左側 (= 起点家の 右端から X+1幢目以降) → 反時計回りに 各家の山を 全部消費
+//   6) ツモ順 = カット位置のすぐ左 (= 自摸山の右端) から **同一幢の上→下 → 次幢の上→下** と取る
+function applyDice(walls, diceTotal, oyaSeat = 'bottom') {
+  // 親から反時計回りに diceTotal 数えた家が 起点家 (= 山を開ける家)
+  const oyaCcw = ccwFrom(oyaSeat);
+  const startSeat = oyaCcw[(diceTotal - 1) % 4];
   const ccw = ccwFrom(startSeat);
   const startWall = walls[startSeat];
-  // カット位置 = 起点家山の右端から diceTotal 牌引いた位置 (= 27 - diceTotal)
-  const cutPosInStart = startWall.length - diceTotal;
+  const X = diceTotal;
+  // 王牌: 起点家 1幢目〜min(7,X-1)幢目 + (X<8なら) 隣家 1幢目〜(7-(X-1))幢目
+  // 隣家にまたがる王牌幢数: max(0, 7 - (X - 1)) = max(0, 8 - X)
+  // ※ X=2 → 起点家 1幢目のみ (1幢=2牌) + 隣家 6幢 = 計7幢、 X=8 → 起点家 7幢全部
+  const kingDouInStart = Math.min(7, X - 1);  // 起点家側の 王牌幢数 (1〜7)
+  const kingDouInNext = Math.max(0, 8 - X);   // 隣家側の 王牌幢数 (0〜6)
 
-  // 王牌 14牌 (カット位置から右へ、 起点家山に入りきらない場合 隣にまたがる)
-  let kingTiles;
-  if (diceTotal >= 14) {
-    kingTiles = startWall.slice(cutPosInStart, cutPosInStart + 14);
-  } else {
-    const overflow = 14 - diceTotal;
-    kingTiles = [
-      ...startWall.slice(cutPosInStart),
-      ...walls[ccw[1]].slice(0, overflow),
-    ];
+  // 王牌牌リスト (7幢 = 14牌、 サイコロ近い側から並べる = 起点家 1幢目から)
+  const kingTiles = [];
+  for (let d = 0; d < kingDouInStart; d++) {
+    kingTiles.push(startWall[douToArrIdx(d, 'top')]);
+    kingTiles.push(startWall[douToArrIdx(d, 'bot')]);
+  }
+  for (let d = 0; d < kingDouInNext; d++) {
+    kingTiles.push(walls[ccw[1]][douToArrIdx(d, 'top')]);
+    kingTiles.push(walls[ccw[1]][douToArrIdx(d, 'bot')]);
   }
 
-  // 自摸山 = ツモる順 (カット位置のすぐ左から左方向、 そして 反時計回り次家の右端から左方向、 …)
-  // つまり 各家の山を reverse して 連結すれば、 drawTiles.shift() で 正しい順にツモれる
-  let drawTiles;
-  if (diceTotal >= 14) {
-    drawTiles = [
-      ...startWall.slice(0, cutPosInStart).slice().reverse(),  // 起点家 自摸山 右→左
-      ...walls[ccw[1]].slice().reverse(),                       // 次家 27牌 右→左
-      ...walls[ccw[2]].slice().reverse(),
-      ...walls[ccw[3]].slice().reverse(),
-    ];
+  // ドラ表示 = 「カット位置から右に3幢目の上段」
+  // = 山の右端から (X-3)幢目の上段 (0-based: X-4)
+  // X=8 → 起点家の 4幢目(0-based) の 上段
+  // X=2 → 起点家の-2幢目 = 隣家 1幢目の 上段
+  // X=3 → 起点家の-1幢目 = 隣家 0幢目の 上段
+  let doraSeat, doraDouIdx;
+  if (X >= 4) {
+    doraSeat = startSeat;
+    doraDouIdx = X - 4;  // 0-based
   } else {
-    // 王牌が次家にまたがる: 次家の overflow 以降が 自摸山
-    const overflow = 14 - diceTotal;
-    drawTiles = [
-      ...startWall.slice(0, cutPosInStart).slice().reverse(),
-      ...walls[ccw[1]].slice(overflow).slice().reverse(),
-      ...walls[ccw[2]].slice().reverse(),
-      ...walls[ccw[3]].slice().reverse(),
-    ];
+    doraSeat = ccw[1];
+    doraDouIdx = -(X - 4) - 1;  // X=3→0, X=2→1
   }
+  const doraIndicator = walls[doraSeat][douToArrIdx(doraDouIdx, 'top')];
 
-  // ドラ表示 = カット位置から右に 3枚目 (= 王牌の左から3枚目 = サイコロで数えた位置から+2)
-  const doraIndicator = kingTiles[2];
-
-  return { startSeat, cutPosInStart, kingTiles, drawTiles, doraIndicator };
+  // 自摸山: カット位置の すぐ左 (起点家の X幢目) から左方向、 各幢 上→下 → 反時計回り次家の 1幢目から …
+  // 起点家側で 残った自摸山幢数 = 14 - X (X=2→12幢、 X=8→6幢、 X=12→2幢)
+  // 隣家 (王牌に使われていない部分): 14 - kingDouInNext 幢
+  const drawTiles = [];
+  // (a) 起点家の 自摸山部分: 幢 X-1..13 の 上→下 (13幢目は単独上段)
+  for (let d = X - 1; d <= 13; d++) {
+    drawTiles.push(startWall[douToArrIdx(d, 'top')]);
+    if (d !== 13) drawTiles.push(startWall[douToArrIdx(d, 'bot')]);
+  }
+  // (b) 隣家 (ccw[1]): 王牌で使った 幢 0..kingDouInNext-1 の 後ろから自摸山、 幢 kingDouInNext..13 の 上→下
+  for (let d = kingDouInNext; d <= 13; d++) {
+    drawTiles.push(walls[ccw[1]][douToArrIdx(d, 'top')]);
+    if (d !== 13) drawTiles.push(walls[ccw[1]][douToArrIdx(d, 'bot')]);
+  }
+  // (c) ccw[2], ccw[3]: 全 14幢 自摸山として 上→下
+  for (let i = 2; i <= 3; i++) {
+    for (let d = 0; d <= 13; d++) {
+      drawTiles.push(walls[ccw[i]][douToArrIdx(d, 'top')]);
+      if (d !== 13) drawTiles.push(walls[ccw[i]][douToArrIdx(d, 'bot')]);
+    }
+  }
+  // 検算: drawTiles 長さ = 108 - 14 = 94
+  // (a) 起点家: 14-X 幢 → 幢数=14-X、 ただし最後の13幢目は1牌のみ → 牌数 = (14-X)*2 - (X<=13 ? 1 : 0)
+  //   X=8 → 6幢 → 11牌 (= 5*2 + 1 = 11) ✓
+  // (b) 隣家: 14-kingDouInNext 幢 → 牌数 = (14-kingDouInNext)*2 - 1
+  //   X=8 → kingDouInNext=0 → 14幢 → 27牌 ✓
+  // (c) ccw[2..3]: 各 27牌 → 計 54牌
+  // 合計 X=8: 11 + 27 + 54 = 92 ?? 94-92 = 2牌足りない…
+  // ↑ 計算ミス: (a) 「14-X 幢」 だが 最後 (13幢目) のみ単独。 (14-X)*2 - 1 は 最後幢が13幢目のときのみ。
+  //   X=8 で d = 7..13 → 7幢、 13幢目で -1、 牌数 = 7*2 - 1 = 13牌 ✓
+  //   X=2 で d = 1..13 → 13幢、 13幢目で -1、 牌数 = 13*2 - 1 = 25牌
+  // 訂正: (b) 隣家 王牌のうち 幢 0..kingDouInNext-1 を 王牌で使う → 残 (14-kingDouInNext)幢、 13幢目だけ 単独 → 牌数 = (14-kingDouInNext)*2 - 1
+  //   X=8 → kingDouInNext=0 → 14幢、 13幢目単独 → 27牌 ✓
+  // 計算: X=8 → (a)13 + (b)27 + (c)54 = 94 ✓ 正解
+  return { startSeat, cutPosInStart: X, kingTiles, drawTiles, doraIndicator,
+           doraSeat, doraDouIdx, kingDouInStart, kingDouInNext };
 }
 
 // ─── 配牌 (反時計回り 4-4-4-1) ────────────────
@@ -548,96 +602,124 @@ function renderRiver(seat) {
   });
 }
 
-// ─── 描画: 山 (通常麻雀通り — 起点家のカット位置左から反時計回り 順次消費) ──
+// ─── 描画: 山 (麻雀正規ルール — 各家14幢 = 上段14+下段13、 右端=1幢目から消費) ─
+// レイアウト: 各家 14列×2行の grid (14幢目=左端のみ上段単独)
+// 消費順: ① 起点家の 自摸山部分 (幢 X-1..13) を 「同一幢の上→下 → 次幢の上→下 → ...」 で取る
+//         ② 隣家 (ccw[1]): 王牌で使った幢 (0..kingDouInNext-1) を除く 残幢 (kingDouInNext..13) を取る
+//         ③ ccw[2], ccw[3]: 全 14幢 を 取る
 function renderWalls() {
   const totalRemain = G.drawTiles.length;
-  // 自摸山+配牌の合計消費数 = 108 - 14 (王牌) - totalRemain
-  const consumedTotal = totalRemain > 0 ? (108 - 14 - totalRemain) : 0;
+  // 配牌+ツモで消費した牌の数 = (108 - 14王牌) - 残自摸山
+  const consumedTotal = totalRemain > 0 ? (94 - totalRemain) : 0;
 
-  // 各家の山残量 (反時計回り順、 起点家のカット位置左から 順次消費)
   const ccw = G.startSeat ? ccwFrom(G.startSeat) : ALL_SEATS;
-  // 起点家の自摸山対象 = カット位置左 cutPosInStart 牌
-  // 反時計回り次家以降 = 各 27牌 全部 (但し 王牌が隣家にまたがる場合は 調整必要、 簡略化省略)
+  const X = G.cutPosInStart || 0;  // サイコロ目
+  const kingDouInStart = G.kingDouInStart || 0;
+  const kingDouInNext = G.kingDouInNext || 0;
+  const doraSeat = G.doraSeat;
+  const doraDouIdx = (typeof G.doraDouIdx === 'number') ? G.doraDouIdx : -1;
 
-  let remaining = consumedTotal;
-  const consumed = { bottom: 0, right: 0, top: 0, left: 0 };
-  // ccw[0] = 起点家: カット位置左の cutPosInStart 牌だけ自摸山対象
-  const startMax = G.cutPosInStart || 0;
-  consumed[ccw[0]] = Math.min(remaining, startMax);
-  remaining -= consumed[ccw[0]];
-  // ccw[1], ccw[2], ccw[3]: 全 27牌が 自摸山対象
-  for (let i = 1; i < 4 && remaining > 0; i++) {
-    const max = 27;
-    consumed[ccw[i]] = Math.min(remaining, max);
-    remaining -= consumed[ccw[i]];
+  // 各家の 「自摸山として 取る順」 リスト = [{douIdx, dan}, ...] (取られる順、 0番目が次にツモられる)
+  const drawOrderPerSeat = { bottom: [], right: [], top: [], left: [] };
+  if (X > 0) {
+    // (a) 起点家
+    for (let d = X - 1; d <= 13; d++) {
+      drawOrderPerSeat[ccw[0]].push({ douIdx: d, dan: 'top' });
+      if (d !== 13) drawOrderPerSeat[ccw[0]].push({ douIdx: d, dan: 'bot' });
+    }
+    // (b) 隣家
+    for (let d = kingDouInNext; d <= 13; d++) {
+      drawOrderPerSeat[ccw[1]].push({ douIdx: d, dan: 'top' });
+      if (d !== 13) drawOrderPerSeat[ccw[1]].push({ douIdx: d, dan: 'bot' });
+    }
+    // (c) ccw[2], ccw[3]
+    for (let i = 2; i <= 3; i++) {
+      for (let d = 0; d <= 13; d++) {
+        drawOrderPerSeat[ccw[i]].push({ douIdx: d, dan: 'top' });
+        if (d !== 13) drawOrderPerSeat[ccw[i]].push({ douIdx: d, dan: 'bot' });
+      }
+    }
   }
 
-  // ドラ表示位置 (カット位置から右に3枚目 = 王牌の左から3枚目)
-  // - 王牌が起点家に入りきる場合: 起点家山の cutPosInStart + 2
-  // - 王牌が隣家にまたがる場合 (diceTotal < 3): 隣家山の 2 - diceTotal の位置
-  const doraIdxInStart = (G.diceTotal > 0 && G.diceTotal >= 3 - 0) ? G.cutPosInStart + 2 : -1;
-  // diceTotal が 1 or 2 の場合のみ ドラが隣家に行くが、 サイコロ目=2-12 なので 常に diceTotal >= 2
-  // 安全のため: cutPosInStart + 2 が 起点家山の長さ (27) 未満なら 起点家、 越えたら 隣家
-  const doraInStart = (G.cutPosInStart + 2) < 27;
-  const doraIdxInStartFinal = doraInStart ? (G.cutPosInStart + 2) : -1;
-  const doraIdxInNext = !doraInStart ? ((G.cutPosInStart + 2) - 27) : -1;
+  // 各家ごと、 何牌消費されたか
+  let remaining = consumedTotal;
+  const consumedPerSeat = { bottom: 0, right: 0, top: 0, left: 0 };
+  for (let i = 0; i < 4; i++) {
+    const seat = ccw[i] || ALL_SEATS[i];
+    const max = drawOrderPerSeat[seat].length;
+    const used = Math.min(remaining, max);
+    consumedPerSeat[seat] = used;
+    remaining -= used;
+  }
+
+  // 王牌の判定: 起点家の 0..kingDouInStart-1 幢 (上下両方) + 隣家の 0..kingDouInNext-1 幢 (上下両方)
+  function isKing(seat, douIdx, dan) {
+    if (seat === ccw[0] && douIdx >= 0 && douIdx < kingDouInStart) return true;
+    if (seat === ccw[1] && douIdx >= 0 && douIdx < kingDouInNext) return true;
+    return false;
+  }
 
   ALL_SEATS.forEach(seat => {
     const container = document.getElementById(`wall-${seat}`);
     if (!container) return;
     container.innerHTML = '';
-    const baseCount = G.walls[seat].length;  // 27
-    const consumedHere = consumed[seat];
 
-    // 表示する牌位置 = consumedHere から baseCount まで (左側を 消費済とする)
-    // 自摸山は 山の左端から消費されるので、 表示は 左端の `consumedHere` 牌を 抜いた残りを左から並べる
-    // 視覚的に 「起点家のカット位置左から 順に減る」 ように:
-    // - 起点家: 左から consumedHere 牌だけ 抜けてる、 表示は 27-consumedHere 牌
-    // - 他家: 同様
+    // 「消費済」 set を 構築 (この家の draw order の 先頭 consumedPerSeat[seat] 個)
+    const drawOrder = drawOrderPerSeat[seat];
+    const consumedHere = consumedPerSeat[seat];
+    const consumedSet = new Set();
+    for (let i = 0; i < consumedHere && i < drawOrder.length; i++) {
+      consumedSet.add(`${drawOrder[i].douIdx}-${drawOrder[i].dan}`);
+    }
+    // 「次にツモる位置」 = drawTiles[0] が この家の山にあれば その位置
+    let nextDraw = null;
+    if (G.drawTiles && G.drawTiles.length > 0) {
+      const nextTile = G.drawTiles[0];
+      const idx = G.walls[seat].indexOf(nextTile);
+      if (idx >= 0) {
+        if (idx === 26) nextDraw = { douIdx: 13, dan: 'top' };
+        else nextDraw = { douIdx: Math.floor(idx / 2), dan: (idx % 2 === 0) ? 'top' : 'bot' };
+      }
+    }
 
-    // 各家の自摸山 範囲 (= 王牌以外):
-    // - 起点家: visIdx 0..cutPosInStart-1 が自摸山 (cutPosInStart 以降は王牌)
-    // - 次家以降: visIdx 0..26 全て自摸山
-    // 自摸山は **右端から左方向に消費される** (= 起点家のカット位置のすぐ左 から取られる)
-    // 各家ごとの自摸山右端 = 起点家=cutPosInStart-1、 他家=26
-    const ccwIdx = ccw.indexOf(seat);
-    const drawWallEndIdx = (ccwIdx === 0) ? G.cutPosInStart - 1 : 26;
-    const drawWallStartIdx = (ccwIdx === 0) ? 0 : 0;
+    // 14幢 × 2段 を grid に 配置
+    for (let douIdx = 0; douIdx <= 13; douIdx++) {
+      for (const dan of ['top', 'bot']) {
+        if (douIdx === 13 && dan === 'bot') continue;  // 14幢目は 上段単独
+        const t = document.createElement('div');
+        t.className = 'wall-tile';
+        t.dataset.dou = douIdx;
+        t.dataset.dan = dan;
+        // grid 配置: 全家共通で、 「右端=1幢目=column N (大)」、 「左端=14幢目=column 1」
+        // bottom/top は横長14列×2行、 left/right は CSS で 2列×14行に転置
+        // dou=0 (右端) → grid-column=14、 dou=13 (左端) → grid-column=1
+        const col = 14 - douIdx;
+        t.style.gridColumn = col;
+        t.style.gridRow = (dan === 'top' ? 1 : 2);
 
-    for (let visIdx = 0; visIdx < baseCount; visIdx++) {
-      const t = document.createElement('div');
-      t.className = 'wall-tile';
-      // 消費済判定: 自摸山の右端から N 牌が消費 → visIdx > drawWallEndIdx - consumedHere && visIdx <= drawWallEndIdx
-      const inDrawWall = visIdx >= drawWallStartIdx && visIdx <= drawWallEndIdx;
-      const consumedFromRight = consumedHere;
-      if (inDrawWall && visIdx > drawWallEndIdx - consumedFromRight) {
-        t.style.visibility = 'hidden';
+        const isK = isKing(seat, douIdx, dan);
+        const isDora = (seat === doraSeat && douIdx === doraDouIdx && dan === 'top');
+
+        if (isDora) {
+          t.classList.add('wall-tile--dora');
+          if (G.doraIndicator) {
+            const fn = TILE_IMG[G.doraIndicator.id];
+            if (fn) t.style.backgroundImage = `url('assets/${encodeURIComponent(fn)}')`;
+            t.title = 'ドラ表示: ' + TILE_NAMES[G.doraIndicator.id];
+          }
+        } else if (isK) {
+          t.classList.add('wall-tile--king');
+        } else {
+          // 自摸山: 消費済 or 残存 or 次ツモ
+          const key = `${douIdx}-${dan}`;
+          if (consumedSet.has(key)) {
+            t.style.visibility = 'hidden';
+          } else if (nextDraw && nextDraw.douIdx === douIdx && nextDraw.dan === dan) {
+            t.classList.add('wall-tile--next');
+          }
+        }
+        container.appendChild(t);
       }
-      // ドラ表示 (カット位置 + 2 = 王牌の左から3枚目)
-      let isDora = false;
-      if (seat === G.startSeat && visIdx === doraIdxInStartFinal && G.doraIndicator) {
-        isDora = true;
-      } else if (seat === ccw[1] && visIdx === doraIdxInNext && doraIdxInNext >= 0 && G.doraIndicator) {
-        isDora = true;
-      }
-      if (isDora) {
-        t.classList.add('wall-tile--dora');
-        const fn = TILE_IMG[G.doraIndicator.id];
-        if (fn) t.style.backgroundImage = `url('assets/${encodeURIComponent(fn)}')`;
-        t.title = 'ドラ表示: ' + TILE_NAMES[G.doraIndicator.id];
-        t.style.visibility = 'visible';  // ドラ表示は 消費されない
-      } else if (seat === G.startSeat && visIdx >= G.cutPosInStart) {
-        // 王牌部分 (カット位置以降)
-        t.classList.add('wall-tile--king');
-        if (visIdx === G.cutPosInStart) t.classList.add('wall-tile--cut-line');
-        t.style.visibility = 'visible';
-      } else if (inDrawWall && visIdx === drawWallEndIdx - consumedFromRight && consumedFromRight < (drawWallEndIdx - drawWallStartIdx + 1)) {
-        // 次のツモ位置 = この家の自摸山 右端から 消費済の すぐ左 (= 次に取られる牌)
-        // ただし この家がまだ自摸山を持っているとき (= 完全消費されていない時) のみハイライト
-        // 起点家以外は 起点家が空になってから 自分の山が始まる、 簡略: 起点家のみハイライト
-        if (ccwIdx === 0) t.classList.add('wall-tile--next');
-      }
-      container.appendChild(t);
     }
   });
 }
@@ -1116,6 +1198,10 @@ function startNewRound() {
   G.kingTiles = [];
   G.drawTiles = [];
   G.doraIndicator = null;
+  G.doraSeat = null;
+  G.doraDouIdx = -1;
+  G.kingDouInStart = 0;
+  G.kingDouInNext = 0;
   G.isRiichi = { bottom: false, right: false, top: false, left: false };
   G.riichiTurnsLeft = { bottom: 0, right: 0, top: 0, left: 0 };
   G.pendingRon = null;
@@ -1170,12 +1256,16 @@ async function showDiceCeremony() {
   totalEl.textContent = total;
   G.diceTotal = total;
 
-  // サイコロ結果を 山に適用
-  const r = applyDice(G.walls, total);
+  // サイコロ結果を 山に適用 (親 G.oya から 反時計回りに数える)
+  const r = applyDice(G.walls, total, G.oya);
   G.startSeat = r.startSeat;
-  G.cutPosInStart = r.cutPosInStart;
+  G.cutPosInStart = r.cutPosInStart;  // = サイコロ目X (= カット位置 = 右端からX幢目)
   G.kingTiles = r.kingTiles;
   G.drawTiles = r.drawTiles;
+  G.doraSeat = r.doraSeat;
+  G.doraDouIdx = r.doraDouIdx;
+  G.kingDouInStart = r.kingDouInStart;
+  G.kingDouInNext = r.kingDouInNext;
   G.doraIndicator = r.doraIndicator;
 
   await sleep(400);
