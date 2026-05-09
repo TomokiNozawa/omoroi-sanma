@@ -140,6 +140,12 @@ body {
 }
 .seat__hand--bottom { display: flex; flex-direction: row; flex-wrap: wrap; gap: 1px; max-width: 96vw; justify-content: center; }
 .seat__wall--bottom { display: grid; grid-template-columns: repeat(14, auto); grid-template-rows: auto auto; gap: 1px; }
+/* 対面: 横長 14列×2段、 ただし top dan は 視覚的に画面下側 (卓中央寄り) */
+.seat__wall--top { display: grid; grid-template-columns: repeat(14, auto); grid-template-rows: auto auto; gap: 1px; }
+/* 上家: 縦長 2列×14段 */
+.seat__wall--left { display: grid; grid-template-columns: auto auto; grid-template-rows: repeat(14, auto); gap: 1px; }
+/* 下家: 縦長 2列×14段 */
+.seat__wall--right { display: grid; grid-template-columns: auto auto; grid-template-rows: repeat(14, auto); gap: 1px; }
 .seat__river--bottom { display: grid; grid-template-columns: repeat(6, auto); gap: 1px; padding: 2px; }
 
 /* === 対面 (画面上) === */
@@ -150,7 +156,7 @@ body {
 }
 .seat__hand--top { display: flex; flex-direction: row; gap: 1px; }
 .seat__hand--top .tile { transform: rotate(180deg); }
-.seat__wall--top { display: grid; grid-template-columns: repeat(14, auto); grid-template-rows: auto auto; gap: 1px; transform: rotate(180deg); }
+/* (top wall は 上で 定義済) */
 .seat__river--top { display: grid; grid-template-columns: repeat(6, auto); gap: 1px; padding: 2px; }
 .seat__river--top .tile { transform: rotate(180deg); }
 
@@ -163,7 +169,7 @@ body {
 .seat--left { gap: 4px; }
 .seat__hand--left { display: flex; flex-direction: column; gap: 1px; }
 .seat__hand--left .tile { transform: rotate(90deg); }
-.seat__wall--left { display: grid; grid-template-columns: repeat(14, auto); grid-template-rows: auto auto; gap: 1px; transform: rotate(-90deg); transform-origin: center; }
+/* (left wall は 上で 定義済、 縦長 2列×14行) */
 .seat__river--left { display: grid; grid-template-rows: repeat(6, auto); grid-auto-flow: column; gap: 1px; padding: 2px; }
 .seat__river--left .tile { transform: rotate(90deg); }
 .seat--left .seat__label { writing-mode: vertical-rl; }
@@ -177,7 +183,7 @@ body {
 .seat--right { gap: 4px; }
 .seat__hand--right { display: flex; flex-direction: column; gap: 1px; }
 .seat__hand--right .tile { transform: rotate(-90deg); }
-.seat__wall--right { display: grid; grid-template-columns: repeat(14, auto); grid-template-rows: auto auto; gap: 1px; transform: rotate(90deg); transform-origin: center; }
+/* (right wall は 上で 定義済、 縦長 2列×14行) */
 .seat__river--right { display: grid; grid-template-rows: repeat(6, auto); grid-auto-flow: column; gap: 1px; padding: 2px; }
 .seat__river--right .tile { transform: rotate(-90deg); }
 .seat--right .seat__label { writing-mode: vertical-rl; }
@@ -191,7 +197,7 @@ body {
   box-shadow: inset 0 1px 0 rgba(255,255,255,0.08), 0 1px 3px rgba(0,0,0,0.5);
 }
 .wall-tile {
-  width: 12px; height: 16px;
+  width: 10px; height: 14px;
   background: linear-gradient(180deg, #0e6e3e 0%, #094a28 100%);
   border: 1px solid #052010;
   border-radius: 2px;
@@ -199,6 +205,7 @@ body {
   box-shadow: 0 1px 1px rgba(0,0,0,0.5);
 }
 /* left/right も bottom/top と同じ 縦長 wall-tile (rotate で 視覚的に縦並びになる) */
+.seat__wall { padding: 2px; }
 .wall-tile--next {
   background: linear-gradient(180deg, #ffeb3b 0%, #fbc02d 100%);
   border-color: #f57f17;
@@ -306,7 +313,7 @@ body {
   .tile--river { width: 18px; height: 26px; }
   .lobby { max-width: 600px; }
   .game__header { font-size: 13px; }
-  .wall-tile { width: 16px; height: 22px; }
+  .wall-tile { width: 14px; height: 20px; }
   .center { width: 160px; padding: 8px; }
   .center__dora-label, .seat__label { font-size: 11px; }
   .center__round-info { font-size: 13px; }
