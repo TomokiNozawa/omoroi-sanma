@@ -1135,6 +1135,20 @@ function endRound(reason) {
 }
 
 // ─── あがりモーダル (翻数表示) ─────────────────
+// 翻数 → 点数表 (4麻標準、 三麻も同じ表で簡略化、 30符固定)
+// rowHan: 表の翻区分 (1,2,3,'満貫','跳満','倍満','3倍満','役満')
+// matchHan(han, isYakuman): han が この行に属するか
+const SCORE_TABLE = [
+  { label: '1翻',           match: (h,y) => !y && h === 1,  oyaRon: 1500,  oyaTsumo: 500,  koRon: 1000,  koTsumoOya: 500,  koTsumoKo: 300 },
+  { label: '2翻',           match: (h,y) => !y && h === 2,  oyaRon: 2900,  oyaTsumo: 1000, koRon: 2000,  koTsumoOya: 1000, koTsumoKo: 500 },
+  { label: '3翻',           match: (h,y) => !y && h === 3,  oyaRon: 5800,  oyaTsumo: 2000, koRon: 3900,  koTsumoOya: 2000, koTsumoKo: 1000 },
+  { label: '4-5翻 (満貫)',  match: (h,y) => !y && (h === 4 || h === 5), oyaRon: 12000, oyaTsumo: 4000, koRon: 8000,  koTsumoOya: 4000,  koTsumoKo: 2000 },
+  { label: '6-7翻 (跳満)',  match: (h,y) => !y && (h === 6 || h === 7), oyaRon: 18000, oyaTsumo: 6000, koRon: 12000, koTsumoOya: 6000,  koTsumoKo: 3000 },
+  { label: '8-10翻 (倍満)', match: (h,y) => !y && (h >= 8 && h <= 10),  oyaRon: 24000, oyaTsumo: 8000, koRon: 16000, koTsumoOya: 8000,  koTsumoKo: 4000 },
+  { label: '11-12翻 (3倍満)', match: (h,y) => !y && (h === 11 || h === 12), oyaRon: 36000, oyaTsumo: 12000, koRon: 24000, koTsumoOya: 12000, koTsumoKo: 6000 },
+  { label: '13翻+ (役満)',  match: (h,y) => y || h >= 13,    oyaRon: 48000, oyaTsumo: 16000, koRon: 32000, koTsumoOya: 16000, koTsumoKo: 8000 },
+];
+
 function showWinModal(seat, hand, context, result) {
   const overlay = document.getElementById('end-overlay');
   const titleEl = document.getElementById('end-title');
@@ -1144,53 +1158,73 @@ function showWinModal(seat, hand, context, result) {
   const whoLabel = (seat === 'bottom') ? 'あなた' : SEAT_LABEL_BASE[seat];
   const winType = context.isTsumo ? 'ツモ' : 'ロン';
   const tier = hanToTier(result.han, result.isYakuman);
-  titleEl.textContent = `🎉 ${whoLabel}の${winType}あがり! ${tier}`;
+  const isOya = (G.oya === seat);
+  titleEl.textContent = `🎉 ${whoLabel}の${winType}あがり! ${tier} (${result.isYakuman ? '役満' : result.han + '翻'})`;
 
-  // 翻数別 役一覧 + 今回の hit ハイライト
-  const allYaku = [
-    { name: '立直', han: 1, hint: 'リーチ宣言' },
-    { name: '門前清自摸和', han: 1, hint: '門前ツモ' },
-    { name: 'タンヤオ', han: 1, hint: '2-8のみ' },
-    { name: '役牌', han: 1, hint: '三元/場風/自風' },
-    { name: '北抜き', han: 1, hint: '抜くたび1翻' },
-    { name: '赤ドラ', han: 1, hint: '5p/5s 全枚' },
-    { name: 'ドラ', han: 1, hint: '表示牌の次' },
-    { name: '七対子', han: 2, hint: '7組ペア' },
-    { name: '対々和', han: 2, hint: '4刻子+雀頭' },
-    { name: '三暗刻', han: 2, hint: '暗刻3つ' },
-    { name: '混一色', han: 3, hint: '1色+字牌' },
-    { name: '清一色', han: 6, hint: '1色のみ' },
-    { name: '国士無双', han: 13, hint: '役満' },
-    { name: '四暗刻', han: 13, hint: '役満' },
-    { name: '大三元', han: 13, hint: '役満' },
-    { name: '字一色', han: 13, hint: '役満' },
-    { name: '緑一色', han: 13, hint: '役満' },
-    { name: '清老頭', han: 13, hint: '役満' },
-  ];
-  const hitNames = new Set(result.yakuList.map(y => y.name.replace(/×\d+$/, '').replace(/^北抜き.*/, '北抜き')));
+  // 該当翻数の row index
+  const hitRowIdx = SCORE_TABLE.findIndex(r => r.match(result.han, result.isYakuman));
 
-  const tierGroups = {};
-  for (const y of allYaku) {
-    const key = y.han >= 13 ? '役満' : `${y.han}翻`;
-    if (!tierGroups[key]) tierGroups[key] = [];
-    tierGroups[key].push(y);
+  // タブUI (親/子)、 上がった人で デフォルト
+  const defaultTab = isOya ? 'oya' : 'ko';
+
+  // 役一覧 (今回の hit のみ)
+  let yakuHtml = '<div style="background:rgba(255,235,59,0.12); padding:6px 8px; border-radius:6px; margin:6px 0; text-align:left; font-size:11px;">';
+  yakuHtml += '<b style="color:#ffeb3b;">今回の役:</b> ';
+  yakuHtml += result.yakuList.map(y => `${y.name}<small>(${y.han}翻)</small>`).join(' / ');
+  yakuHtml += '</div>';
+
+  // 点数表 (タブ切替)
+  function buildTable(tab) {
+    let html = '<table style="width:100%; border-collapse:collapse; font-size:10px; margin-top:4px;">';
+    html += '<thead><tr>';
+    html += '<th style="padding:3px 4px; background:#2d6b3f; color:#fff; text-align:left; border:1px solid #4a6;">翻数</th>';
+    if (tab === 'oya') {
+      html += '<th style="padding:3px 4px; background:#2d6b3f; color:#fff; border:1px solid #4a6;">親ロン</th>';
+      html += '<th style="padding:3px 4px; background:#2d6b3f; color:#fff; border:1px solid #4a6;">親ツモ<br><small>(各家払い)</small></th>';
+    } else {
+      html += '<th style="padding:3px 4px; background:#2d6b3f; color:#fff; border:1px solid #4a6;">子ロン</th>';
+      html += '<th style="padding:3px 4px; background:#2d6b3f; color:#fff; border:1px solid #4a6;">子ツモ<br><small>(親 / 子)</small></th>';
+    }
+    html += '</tr></thead><tbody>';
+    SCORE_TABLE.forEach((row, i) => {
+      const hit = (i === hitRowIdx);
+      const rowStyle = hit ? 'background:#ffeb3b; color:#000; font-weight:bold;' : 'background:rgba(255,255,255,0.05); color:#ddd;';
+      html += `<tr style="${rowStyle}">`;
+      html += `<td style="padding:3px 4px; border:1px solid #4a6;">${row.label}</td>`;
+      if (tab === 'oya') {
+        html += `<td style="padding:3px 4px; border:1px solid #4a6; text-align:right;">${row.oyaRon.toLocaleString()}</td>`;
+        html += `<td style="padding:3px 4px; border:1px solid #4a6; text-align:right;">${row.oyaTsumo.toLocaleString()}</td>`;
+      } else {
+        html += `<td style="padding:3px 4px; border:1px solid #4a6; text-align:right;">${row.koRon.toLocaleString()}</td>`;
+        html += `<td style="padding:3px 4px; border:1px solid #4a6; text-align:right;">${row.koTsumoOya.toLocaleString()} / ${row.koTsumoKo.toLocaleString()}</td>`;
+      }
+      html += '</tr>';
+    });
+    html += '</tbody></table>';
+    return html;
   }
-  let html = '<div style="text-align:left; font-size:11px; max-height:50vh; overflow-y:auto;">';
-  for (const tierName of Object.keys(tierGroups)) {
-    html += `<div style="margin:4px 0;"><b style="color:#ffeb3b;">${tierName}</b>: `;
-    html += tierGroups[tierName].map(y => {
-      const isHit = hitNames.has(y.name) || result.yakuList.some(r => r.name.includes(y.name));
-      return `<span style="margin:0 4px; ${isHit ? 'background:#ffeb3b; color:#000; padding:1px 4px; border-radius:3px; font-weight:bold;' : 'opacity:0.5;'}">${y.name}</span>`;
-    }).join(' ');
-    html += '</div>';
-  }
+
+  let html = yakuHtml;
+  // タブ
+  html += '<div style="display:flex; gap:4px; margin-top:8px;">';
+  html += `<button id="win-tab-oya" class="win-tab" data-tab="oya" style="flex:1; padding:6px; border:1px solid #4a6; background:${defaultTab === 'oya' ? '#4caf50' : '#143820'}; color:#fff; cursor:pointer; border-radius:4px 4px 0 0; font-size:12px;">親で上がった場合</button>`;
+  html += `<button id="win-tab-ko" class="win-tab" data-tab="ko" style="flex:1; padding:6px; border:1px solid #4a6; background:${defaultTab === 'ko' ? '#4caf50' : '#143820'}; color:#fff; cursor:pointer; border-radius:4px 4px 0 0; font-size:12px;">子で上がった場合</button>`;
   html += '</div>';
-  html += '<div style="margin-top:10px; padding:8px; background:rgba(255,235,59,0.15); border-radius:6px; text-align:left;">';
-  html += '<b style="color:#ffeb3b;">今回の役 (合計' + (result.isYakuman ? '役満' : `${result.han}翻 = ${tier}`) + '):</b><br>';
-  html += result.yakuList.map(y => `・${y.name} ${y.han}翻`).join('<br>');
-  html += '</div>';
+  html += `<div id="win-table-area">${buildTable(defaultTab)}</div>`;
+  html += `<p style="margin:8px 0 0; font-size:10px; color:#aac; text-align:left;">※ 30符固定の簡易点数表 (4麻標準)、 該当翻数を黄色で強調</p>`;
   textEl.innerHTML = html;
   overlay.hidden = false;
+
+  // タブ クリック
+  document.querySelectorAll('.win-tab').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const tab = btn.dataset.tab;
+      document.querySelectorAll('.win-tab').forEach(b => {
+        b.style.background = (b.dataset.tab === tab) ? '#4caf50' : '#143820';
+      });
+      document.getElementById('win-table-area').innerHTML = buildTable(tab);
+    });
+  });
 }
 
 // 三麻 半荘 = 東3+南3 = 6局

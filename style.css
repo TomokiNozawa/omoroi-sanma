@@ -91,8 +91,10 @@ body {
   position: absolute;
   display: grid;
   gap: 1px;
-  padding: 2px;
-  z-index: 2;
+  padding: 3px;
+  z-index: 5;  /* 山 (z-index 0) と 中央box (z-index 1) より 上、 河は最優先表示 */
+  background: rgba(0,0,0,0.25);
+  border-radius: 4px;
 }
 .river-area--bottom, .river-area--top {
   grid-template-columns: repeat(6, auto);
@@ -104,24 +106,24 @@ body {
   grid-auto-flow: column;
 }
 .river-area--bottom {
-  top: calc(50% + 32px);
+  top: calc(50% + 38px);
   left: 50%;
   transform: translateX(-50%);
 }
 .river-area--top {
-  bottom: calc(50% + 32px);
+  bottom: calc(50% + 38px);
   left: 50%;
   transform: translateX(-50%);
 }
 .river-area--top .tile { transform: rotate(180deg); }
 .river-area--left {
-  right: calc(50% + 32px);
+  right: calc(50% + 38px);
   top: 50%;
   transform: translateY(-50%);
 }
 .river-area--left .tile { transform: rotate(90deg); }
 .river-area--right {
-  left: calc(50% + 32px);
+  left: calc(50% + 38px);
   top: 50%;
   transform: translateY(-50%);
 }
@@ -195,6 +197,8 @@ body {
   border-radius: 3px;
   border: 1px solid #2d6b3f;
   box-shadow: inset 0 1px 0 rgba(255,255,255,0.08), 0 1px 3px rgba(0,0,0,0.5);
+  z-index: 1;
+  position: relative;
 }
 .wall-tile {
   width: 10px; height: 14px;
