@@ -668,21 +668,13 @@ function renderWalls() {
     for (let i = 0; i < consumedHere && i < drawOrder.length; i++) {
       consumedSet.add(`${drawOrder[i].douIdx}-${drawOrder[i].dan}`);
     }
-    // 「次にツモる位置」 = drawTiles[0] が この家の山にあれば その位置
-    let nextDraw = null;
-    if (G.drawTiles && G.drawTiles.length > 0) {
-      const nextTile = G.drawTiles[0];
-      const idx = G.walls[seat].indexOf(nextTile);
-      if (idx >= 0) {
-        if (idx === 26) nextDraw = { douIdx: 13, dan: 'top' };
-        else nextDraw = { douIdx: Math.floor(idx / 2), dan: (idx % 2 === 0) ? 'top' : 'bot' };
-      }
-    }
+    // 次にツモる位置のハイライトは 紛らわしいため 廃止 (= 何もしない)
 
-    // 14幢 × 2段 を grid に 配置 (各家で 視覚配置が違う)
-    for (let douIdx = 0; douIdx <= 13; douIdx++) {
+    // 13幢 × 2段 = 26牌 を grid に 配置 (各家で 視覚配置が違う)
+    // 14単独 (douIdx=13、 dan='top') は **視覚的には表示しない** (= 内部ロジック上は 自摸山に含む)
+    // → 各家 「13幢ペア = 26牌」 で 揃った表示になり、 「1枚減った印象」 を 解消
+    for (let douIdx = 0; douIdx <= 12; douIdx++) {
       for (const dan of ['top', 'bot']) {
-        if (douIdx === 13 && dan === 'bot') continue;  // 14幢目は 上段単独
         const t = document.createElement('div');
         t.className = 'wall-tile';
         t.dataset.dou = douIdx;
@@ -719,12 +711,10 @@ function renderWalls() {
         } else if (isK) {
           t.classList.add('wall-tile--king');
         } else {
-          // 自摸山: 消費済 or 残存 or 次ツモ
+          // 自摸山: 消費済 or 残存 (「次にツモる位置」 の黄色ハイライトは 廃止 = 紛らわしい指摘あり)
           const key = `${douIdx}-${dan}`;
           if (consumedSet.has(key)) {
             t.style.visibility = 'hidden';
-          } else if (nextDraw && nextDraw.douIdx === douIdx && nextDraw.dan === dan) {
-            t.classList.add('wall-tile--next');
           }
         }
         container.appendChild(t);
@@ -881,8 +871,9 @@ function checkRonForBottom(fromSeat, tile) {
 function onMyHandClick(tile) {
   if (G.turn !== 'bottom' || G.busy) return;
   if (G.hands.bottom.length !== 14) return;
-  // リーチ後は 手牌操作禁止 (自動でツモ牌が捨てられる)
-  if (G.isRiichi.bottom) {
+  // リーチ後 (宣言牌すでに捨てた状態) は 手牌操作禁止
+  // ※ リーチ宣言直後 (= G.justRiichiDeclared === 'bottom') は 1枚捨てるまで 操作OK
+  if (G.isRiichi.bottom && G.justRiichiDeclared !== 'bottom') {
     toast('リーチ後は 手牌を変更できません');
     return;
   }
@@ -977,7 +968,8 @@ function startTurn() {
     drawTile('bottom');
     renderAll();
     // リーチ後 自家: ツモあがり可能なら ツモボタン active、 そうでなければ ツモ牌を 自動捨て
-    if (G.isRiichi.bottom && G.hands.bottom.length === 14) {
+    // ※ リーチ宣言直後 (= まだ宣言牌を捨てていない) は スキップ (ユーザーが自分で1枚選んで捨てる)
+    if (G.isRiichi.bottom && G.hands.bottom.length === 14 && G.justRiichiDeclared !== 'bottom') {
       const justDrawnTile = G.hands.bottom[G.justDrawn];
       let canTsumoNow = false;
       if (isWinning(G.hands.bottom)) {
@@ -1009,22 +1001,23 @@ function startTurn() {
 }
 
 function cpuPlay(seat) {
+  const wasRiichiBefore = G.isRiichi[seat];  // 前ターン から リーチ済か (= 既リーチ)
   drawTile(seat);
   renderHand(seat);
-  // リーチ後の CPU は ツモ牌固定 (待ち変更不可)
-  if (G.isRiichi[seat]) {
-    setTimeout(() => cpuDiscard(seat, true), 500);  // forceTsumoTile=true
+  // 既リーチ (前ターンから) = ツモ牌固定で 捨て (待ち変更不可)
+  if (wasRiichiBefore) {
+    setTimeout(() => cpuDiscard(seat, true), 500);
     return;
   }
-  // CPU リーチ判定 (14牌時、 未リーチ、 1000点以上、 テンパイ、 70%確率)
-  if (G.hands[seat].length === 14 && !G.isRiichi[seat]
-      && G.scores[seat] >= 1000 && canDeclareRiichi(G.hands[seat])) {
+  // 未リーチ → リーチ判定 (14牌、 1000点以上、 テンパイ、 70%確率)
+  if (G.hands[seat].length === 14 && G.scores[seat] >= 1000 && canDeclareRiichi(G.hands[seat])) {
     if (Math.random() > 0.3) {
       G.isRiichi[seat] = true;
       G.riichiTurnsLeft[seat] = 4;
       G.scores[seat] -= 1000;
-      G.justRiichiDeclared = seat;  // 次の打牌が リーチ宣言牌
+      G.justRiichiDeclared = seat;  // 宣言ターン = この打牌が リーチ宣言牌 (横向き)
       toast(`${SEAT_LABEL_BASE[seat]} リーチ! (-1000点)`);
+      // ※ 宣言ターンは 通常打牌 (= 1枚自由選択) で 続行、 強制 ツモ牌捨ては 翌ターンから
     }
   }
   const kitaIdx = G.hands[seat].findIndex(t => t.id === KITA_ID);
