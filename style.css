@@ -85,6 +85,7 @@ body {
   line-height: 1.2;
 }
 .center__round-info #center-remain { color: #ffeb3b; font-size: 14px; display: block; }
+.center__kyotaku { display: block; font-size: 8px; color: #ff9800; }
 
 /* 河エリア — 中央 box の 4方向、 6×3 grid 固定 (max18牌) */
 .river-area {
@@ -252,11 +253,11 @@ body {
 .tile--small { width: 18px; height: 24px; }
 .tile--mini  { width: 14px; height: 19px; }
 .tile--river { width: 16px; height: 22px; }
-/* リーチ宣言牌 = 横向き (90deg)、 各家の 河 内で 適切に 回転 */
+/* リーチ宣言牌 = 横向き (+90deg)、 各家の 河 (.river-area--*) の 基本回転に 加算 */
 .tile--riichi-dec { transform: rotate(90deg) !important; }
-.seat__river--top .tile--riichi-dec { transform: rotate(180deg) rotate(90deg) !important; }
-.seat__river--left .tile--riichi-dec { transform: rotate(90deg) rotate(90deg) !important; }
-.seat__river--right .tile--riichi-dec { transform: rotate(-90deg) rotate(90deg) !important; }
+.river-area--top .tile--riichi-dec { transform: rotate(270deg) !important; }
+.river-area--left .tile--riichi-dec { transform: rotate(180deg) !important; }
+.river-area--right .tile--riichi-dec { transform: rotate(0deg) !important; }
 
 /* ── アクションバー ── */
 .action-bar { display: flex; gap: 4px; padding: 6px 8px; background: rgba(0,0,0,0.55); align-items: center; justify-content: space-around; }

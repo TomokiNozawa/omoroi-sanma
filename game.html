@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="theme-color" content="#0d3b1f">
-  <link rel="stylesheet" href="style.css?v=0.7.5">
+  <link rel="stylesheet" href="style.css?v=0.7.6">
   <title>対戦中 — おもろい三麻</title>
 </head>
 <body class="game-body">
@@ -25,6 +25,7 @@
       <div class="center">
         <div class="center__round-info">
           <span id="center-round">東1</span><br>山残 <span id="center-remain">54</span>
+          <span id="center-kyotaku" class="center__kyotaku"></span>
         </div>
       </div>
 
@@ -58,7 +59,7 @@
       <!-- 自家 (画面下、 親) -->
       <div class="seat seat--bottom" id="seat-bottom">
         <div class="seat__wall seat__wall--bottom" id="wall-bottom"></div>
-        <div class="seat__label" id="label-bottom">あなた (親) — 東家</div>
+        <div class="seat__label" id="label-bottom">あなた</div>
         <div class="seat__hand seat__hand--mine seat__hand--bottom" id="hand-bottom"></div>
       </div>
     </div>
@@ -67,6 +68,7 @@
       <button class="action-btn" id="btn-riichi" disabled>リーチ</button>
       <button class="action-btn" id="btn-tsumo" disabled>ツモ</button>
       <button class="action-btn" id="btn-ron" disabled>ロン</button>
+      <button class="action-btn" id="btn-pass" disabled>パス</button>
       <button class="action-btn" id="btn-kita" disabled>北抜き</button>
       <button class="action-btn action-btn--primary" id="btn-discard" disabled>打牌</button>
     </footer>
@@ -125,6 +127,6 @@
     </div>
   </div>
 
-  <script src="script.js?v=0.7.5"></script>
+  <script src="script.js?v=0.7.6"></script>
 </body>
 </html>
