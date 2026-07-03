@@ -712,10 +712,10 @@ function renderHand(seat) {
       if (G.selected === drawnTile) el.classList.add('tile--selected');
       container.appendChild(el);
     }
-    // 抜いた北: 手牌の右端に 小さく並べる
+    // 抜いた北: 手牌の右端に 少し間隔を空けて 並べる
     if (G.kitaTiles.bottom.length > 0) {
       const sep = document.createElement('span');
-      sep.style.cssText = 'width:10px;display:inline-block;';
+      sep.style.cssText = 'width:20px;display:inline-block;';
       container.appendChild(sep);
       G.kitaTiles.bottom.forEach(kt => {
         const el = createTileEl(kt, { small: true });
@@ -761,14 +761,14 @@ function renderRiver(seat) {
       el.style.gridRow = line + 1;          // 上 (中央寄り) → 下
       el.style.gridColumn = pos;
     } else if (seat === 'top') {
-      el.style.gridRow = lines - line;      // 下 (中央寄り) → 上
-      el.style.gridColumn = pos;
+      el.style.gridRow = lines - line;               // 下 (中央寄り) → 上
+      el.style.gridColumn = perLine + 1 - pos;       // 本人視点で左詰め = 画面では右から左
     } else if (seat === 'left') {
-      el.style.gridColumn = lines - line;   // 右 (中央寄り) → 左
-      el.style.gridRow = pos;
-    } else {                                 // right
-      el.style.gridColumn = line + 1;       // 左 (中央寄り) → 右
-      el.style.gridRow = pos;
+      el.style.gridColumn = lines - line;            // 右 (中央寄り) → 左
+      el.style.gridRow = pos;                        // 本人の左 = 画面上 → 上から下
+    } else {                                          // right
+      el.style.gridColumn = line + 1;                // 左 (中央寄り) → 右
+      el.style.gridRow = perLine + 1 - pos;          // 本人の左 = 画面下 → 下から上
     }
     container.appendChild(el);
   });
@@ -1752,6 +1752,7 @@ async function showDiceCeremony() {
   if (!overlay) return;
 
   overlay.hidden = false;
+  overlay.classList.remove('dice-overlay--low');
   okBtn.hidden = true;
   counterEl.hidden = true;
   if (mnemonicEl) mnemonicEl.hidden = true;
@@ -1789,6 +1790,10 @@ async function showDiceCeremony() {
   G.drawPosList = r.drawPosList;
   G.kingCells = r.kingCells;
   G.doraIndicator = r.doraIndicator;
+
+  // 起点家の山 (カウント・王牌・ドラ) がポップアップに隠れないよう、
+  // カウントが画面上側で進む 対面/下家 起点のときは ポップアップを下側へ退避
+  overlay.classList.toggle('dice-overlay--low', r.startSeat === 'top' || r.startSeat === 'right');
 
   await sleep(400);
   titleEl.textContent = `合計 ${total}!`;

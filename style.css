@@ -257,12 +257,16 @@ body {
 .tile--latest {
   box-shadow: 0 0 0 2px #ff9800, 0 0 10px rgba(255,152,0,0.9);
 }
-/* 抜いた北 (手牌の右端に表向きで並ぶ) */
+/* 抜いた北 (手牌の右端に表向きで並ぶ、 手牌と間隔を空ける) */
 .tile--kita {
   opacity: 0.92;
   box-shadow: 0 0 0 1px rgba(255,235,59,0.5);
   align-self: flex-end;
 }
+/* CPU席: 伏せ牌の列と 北の間に 間隔 (横並びは左margin、 縦並びは上margin) */
+.seat__hand--top .tile:not(.tile--kita) + .tile--kita { margin-left: 14px; }
+.seat__hand--left .tile:not(.tile--kita) + .tile--kita,
+.seat__hand--right .tile:not(.tile--kita) + .tile--kita { margin-top: 14px; }
 
 /* ── アクションバー (タップ領域 ≥44px、 有効時に色分け) ── */
 .action-bar { display: flex; gap: 5px; padding: 6px 8px; background: rgba(0,0,0,0.55); align-items: stretch; justify-content: space-around; }
@@ -293,6 +297,8 @@ body {
 /* ── サイコロ ── */
 .dice-overlay { position: fixed; top: 60px; left: 50%; transform: translateX(-50%); z-index: 110; pointer-events: none; }
 .dice-overlay[hidden] { display: none; }
+/* 起点家が 対面/下家 のとき: 山のカウント/王牌表示を隠さないよう 下側へ退避 */
+.dice-overlay--low { top: auto; bottom: 150px; }
 .dice-modal { background: rgba(20, 56, 32, 0.97); border: 2px solid #ffeb3b; border-radius: 12px; padding: 12px 14px; max-width: 320px; width: 92vw; text-align: center; box-shadow: 0 4px 20px rgba(0,0,0,0.6), 0 0 16px rgba(255,235,59,0.2); pointer-events: auto; backdrop-filter: blur(4px); }
 .dice-modal__title { margin: 0 0 6px; font-size: 14px; color: #ffeb3b; }
 .dice-row { display: flex; align-items: center; justify-content: center; gap: 5px; margin: 6px 0; }
@@ -313,8 +319,8 @@ body {
 .dice-ok { background: #4caf50; color: #fff; border: none; padding: 6px 16px; border-radius: 6px; font-weight: bold; font-size: 12px; cursor: pointer; margin-top: 4px; }
 .dice-ok[hidden] { display: none; }
 
-/* ── トースト ── */
-.toast { position: fixed; top: 70px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.85); color: #fff; padding: 8px 16px; border-radius: 16px; font-size: 12px; z-index: 50; animation: toast-in 0.2s; }
+/* ── トースト (対面の手牌/ラベルと 河の間の 空きバンドに表示 — 盤面情報を隠さない) ── */
+.toast { position: fixed; top: 124px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.8); color: #fff; padding: 7px 14px; border-radius: 16px; font-size: 12px; z-index: 50; animation: toast-in 0.2s; pointer-events: none; }
 .toast[hidden] { display: none; }
 @keyframes toast-in { from { opacity: 0; transform: translate(-50%, -10px); } to { opacity: 1; transform: translate(-50%, 0); } }
 
