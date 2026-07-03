@@ -1685,7 +1685,9 @@ function pickCpuPlacement() {
 
 // ─── 局開始 ────────────────────────────────
 function startNewRound() {
-  if (!G.cpuSeats || G.cpuSeats.length === 0) {
+  // 席が未割当のときのみ ランダム配置 (net対戦は hostStart が割当済 —
+  // ゲスト2人だと cpuSeats=[] になるため、 emptySeat 未設定を「未割当」の判定に使う)
+  if ((!G.cpuSeats || G.cpuSeats.length === 0) && !G.emptySeat) {
     const placement = pickCpuPlacement();
     G.cpuSeats = placement.cpuSeats;
     G.emptySeat = placement.emptySeat;

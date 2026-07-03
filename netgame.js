@@ -173,7 +173,7 @@ const NetGame = (() => {
     S.net.onChildAdd(`rooms/${S.room}/acts`, onAction);
     hideWaiting();
     // 既存フローで開始 (点数リセット込み)
-    G.mode = 'cpu'; G.type = 'hanchan'; G.round = '東1'; G.honba = 0; G.oya = 'bottom';
+    G.mode = 'net'; G.type = 'hanchan'; G.round = '東1'; G.honba = 0; G.oya = 'bottom';
     G.scores = { bottom: 35000, right: 35000, top: 35000, left: 35000 };
     G.kyotaku = 0; G.lastResult = null;
     startNewRound();
