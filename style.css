@@ -257,6 +257,12 @@ body {
 .tile--latest {
   box-shadow: 0 0 0 2px #ff9800, 0 0 10px rgba(255,152,0,0.9);
 }
+/* 抜いた北 (手牌の右端に表向きで並ぶ) */
+.tile--kita {
+  opacity: 0.92;
+  box-shadow: 0 0 0 1px rgba(255,235,59,0.5);
+  align-self: flex-end;
+}
 
 /* ── アクションバー (タップ領域 ≥44px、 有効時に色分け) ── */
 .action-bar { display: flex; gap: 5px; padding: 6px 8px; background: rgba(0,0,0,0.55); align-items: stretch; justify-content: space-around; }

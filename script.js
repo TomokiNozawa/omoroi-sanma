@@ -59,6 +59,7 @@ const G = {
   hands: { bottom: [], right: [], top: [], left: [] },
   rivers: { bottom: [], right: [], top: [], left: [] },
   kitas: { bottom: 0, right: 0, top: 0, left: 0 },
+  kitaTiles: { bottom: [], right: [], top: [], left: [] },  // 抜いた北の実体 (手牌横に表示)
   turn: 'bottom',
   selected: null,
   justDrawn: null,
@@ -694,22 +695,64 @@ function renderHand(seat) {
       if (G.selected === drawnTile) el.classList.add('tile--selected');
       container.appendChild(el);
     }
+    // 抜いた北: 手牌の右端に 小さく並べる
+    if (G.kitaTiles.bottom.length > 0) {
+      const sep = document.createElement('span');
+      sep.style.cssText = 'width:10px;display:inline-block;';
+      container.appendChild(sep);
+      G.kitaTiles.bottom.forEach(kt => {
+        const el = createTileEl(kt, { small: true });
+        el.classList.add('tile--kita');
+        el.title = '北抜き (+1翻)';
+        container.appendChild(el);
+      });
+    }
   } else {
-    // CPU: 伏せ
+    // CPU: 伏せ + 抜いた北は 末尾に表向き
     G.hands[seat].forEach(() => {
       container.appendChild(createTileEl(null, { back: true, small: true }));
+    });
+    G.kitaTiles[seat].forEach(kt => {
+      const el = createTileEl(kt, { small: true });
+      el.classList.add('tile--kita');
+      el.title = '北抜き (+1翻)';
+      container.appendChild(el);
     });
   }
 }
 
-// ─── 描画: 河 (全席 正立・時系列順、 最新打牌はハイライト) ──
+// ─── 描画: 河 (全席 正立・最新打牌はハイライト) ──
+// 段の伸び方向は 実卓と同じ 「1段目が中央寄り、 増えるほど自分の手前側へ」 に統一:
+//   bottom: 上の段から下へ / top: 下の段から上へ / left: 右の列から左へ / right: 左の列から右へ
 function renderRiver(seat) {
   const container = document.getElementById(`river-${seat}`);
   if (!container) return;
   container.innerHTML = '';
-  G.rivers[seat].forEach(tile => {
+  const isPC = (typeof window !== 'undefined' && window.matchMedia)
+    ? window.matchMedia('(min-width: 640px)').matches : false;
+  const arr = G.rivers[seat];
+  const horizontal = (seat === 'bottom' || seat === 'top');
+  // 横河: 6列×可変段 / 縦河: PC=6行×可変列、 モバイル=9行×可変列 (CSS grid と同値)
+  const perLine = horizontal ? 6 : (isPC ? 6 : 9);
+  const lines = Math.max(horizontal ? 3 : (isPC ? 3 : 2), Math.ceil(arr.length / perLine));
+  arr.forEach((tile, i) => {
     const el = createTileEl(tile, { river: true });
     if (tile === G.lastDiscard) el.classList.add('tile--latest');
+    const line = Math.floor(i / perLine);   // 何段目 (0-based)
+    const pos = (i % perLine) + 1;          // 段内位置 (1-based)
+    if (seat === 'bottom') {
+      el.style.gridRow = line + 1;          // 上 (中央寄り) → 下
+      el.style.gridColumn = pos;
+    } else if (seat === 'top') {
+      el.style.gridRow = lines - line;      // 下 (中央寄り) → 上
+      el.style.gridColumn = pos;
+    } else if (seat === 'left') {
+      el.style.gridColumn = lines - line;   // 右 (中央寄り) → 左
+      el.style.gridRow = pos;
+    } else {                                 // right
+      el.style.gridColumn = line + 1;       // 左 (中央寄り) → 右
+      el.style.gridRow = pos;
+    }
     container.appendChild(el);
   });
 }
@@ -1145,7 +1188,8 @@ function kitaNuki(seat) {
   if (G.kingTiles.length === 0) return false;  // 嶺上切れ: 補充できないので 北抜き不可
   const idx = G.hands[seat].findIndex(t => t.id === KITA_ID);
   if (idx < 0) return false;
-  G.hands[seat].splice(idx, 1);
+  const kitaTile = G.hands[seat].splice(idx, 1)[0];
+  G.kitaTiles[seat].push(kitaTile);
   G.kitas[seat]++;
   // 嶺上 (王牌の カット側末尾) から補充
   const replacement = G.kingTiles.pop();
@@ -1461,8 +1505,33 @@ function showWinModal(seat, hand, context, result) {
   // タブUI (親/子)、 上がった人で デフォルト
   const defaultTab = isOya ? 'oya' : 'ko';
 
+  // あがり手牌 (ソート済 + あがり牌を右端で強調)
+  const tileSpan = (t, extra = '') =>
+    `<span style="display:inline-block; width:26px; height:35px; border-radius:3px; background:url('assets/${encodeURIComponent(TILE_IMG[t.id])}') center/100% 100% no-repeat; ${extra}"></span>`;
+  let handHtml = '<div style="background:rgba(0,0,0,0.35); padding:8px 6px 4px; border-radius:6px; margin:6px 0; text-align:center; line-height:1;">';
+  const winTile = context.winTile;
+  const restTiles = winTile ? (() => {
+    const rest = [...hand];
+    const wi = rest.indexOf(winTile);
+    if (wi >= 0) rest.splice(wi, 1);
+    return rest;
+  })() : hand;
+  handHtml += sortHand(restTiles).map(t => tileSpan(t)).join('');
+  if (winTile) {
+    handHtml += '<span style="display:inline-block; width:8px;"></span>';
+    handHtml += tileSpan(winTile, 'box-shadow: 0 0 0 2px #ff9800, 0 0 8px rgba(255,152,0,0.9);');
+  }
+  // 抜いた北も 右に添える
+  if (G.kitaTiles[seat] && G.kitaTiles[seat].length > 0) {
+    handHtml += '<span style="display:inline-block; width:10px;"></span>';
+    handHtml += G.kitaTiles[seat].map(t => tileSpan(t, 'width:20px; height:27px; opacity:0.85;')).join('');
+  }
+  handHtml += `<div style="font-size:9px; color:#aac; margin-top:3px;">${winTile ? `右端が${winType}あがり牌` : ''}${G.kitaTiles[seat] && G.kitaTiles[seat].length > 0 ? ' / 小さい北=北抜き' : ''}</div>`;
+  handHtml += '</div>';
+
   // 役一覧 (今回の hit のみ)
-  let yakuHtml = '<div style="background:rgba(255,235,59,0.12); padding:6px 8px; border-radius:6px; margin:6px 0; text-align:left; font-size:11px;">';
+  let yakuHtml = handHtml;
+  yakuHtml += '<div style="background:rgba(255,235,59,0.12); padding:6px 8px; border-radius:6px; margin:6px 0; text-align:left; font-size:11px;">';
   yakuHtml += '<b style="color:#ffeb3b;">今回の役:</b> ';
   yakuHtml += result.yakuList.map(y => `${y.name}<small>(${y.han}翻)</small>`).join(' / ');
   yakuHtml += '</div>';
@@ -1592,6 +1661,7 @@ function startNewRound() {
   G.walls = buildWalls(allTiles);
   G.rivers = { bottom: [], right: [], top: [], left: [] };
   G.kitas = { bottom: 0, right: 0, top: 0, left: 0 };
+  G.kitaTiles = { bottom: [], right: [], top: [], left: [] };
   G.hands = { bottom: [], right: [], top: [], left: [] };
   G.turn = G.oya;
   G.selected = null;
@@ -1963,6 +2033,12 @@ if (document.getElementById('table')) {
     });
     document.getElementById('end-next')?.addEventListener('click', nextRound);
     document.getElementById('dice-ok')?.addEventListener('click', closeDiceCeremony);
+    // 画面幅が変わったら 河のグリッド配置を再計算 (モバイル⇔PC)
+    let resizeTimer = null;
+    window.addEventListener('resize', () => {
+      if (resizeTimer) clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => { ALL_SEATS.forEach(s => renderRiver(s)); }, 200);
+    });
 
     // キーボード操作 (PC): ←→=牌選択 / Enter・Space=打牌 / R=リーチ / T=ツモ / L=ロン / P=パス / K=北抜き / Esc=ガイド閉じ
     document.addEventListener('keydown', (e) => {
