@@ -138,7 +138,7 @@ const NetGame = (() => {
     watchPlayers();
     // 公開状態 + 自分の手牌を購読
     S.net.onVal(`rooms/${code}/pub`, (json) => { if (json) ingestPub(json); });
-    S.net.onVal(`rooms/${code}/hands/${S.net.uid}`, (json) => { if (json) ingestHand(json); });
+    S.net.onVal(`hands/${code}/${S.net.uid}`, (json) => { if (json) ingestHand(json); });
   }
 
   function watchPlayers() {
@@ -167,7 +167,7 @@ const NetGame = (() => {
     S.net.setVal(`rooms/${S.room}/meta/status`, 'playing');
     // ゲストへ座席通知 (秘匿手牌パスに 席情報を先行送信)
     for (const st of Object.keys(S.remoteSeats)) {
-      S.net.setVal(`rooms/${S.room}/hands/${S.remoteSeats[st]}`,
+      S.net.setVal(`hands/${S.room}/${S.remoteSeats[st]}`,
         JSON.stringify({ seat: st, tiles: [], justDrawn: null }));
     }
     S.net.onChildAdd(`rooms/${S.room}/acts`, onAction);
@@ -228,7 +228,7 @@ const NetGame = (() => {
       });
       if (S.lastHands[uid] !== payload) {
         S.lastHands[uid] = payload;
-        S.net.setVal(`rooms/${S.room}/hands/${uid}`, payload);
+        S.net.setVal(`hands/${S.room}/${uid}`, payload);
       }
     }
   }
