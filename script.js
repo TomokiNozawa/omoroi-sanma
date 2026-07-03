@@ -697,10 +697,23 @@ function renderHand(seat) {
     // 自家: 表向き、 ソート + 末尾にツモ牌
     const sorted = sortHand(G.hands.bottom.filter((_, i) => i !== G.justDrawn));
     const drawnTile = (G.justDrawn != null) ? G.hands.bottom[G.justDrawn] : null;
+    // リーチ宣言モード (雀魂式支援): 捨ててもテンパイ維持できる牌=緑発光、 他=暗転
+    const declaring = (G.justRiichiDeclared === 'bottom');
+    const keepSet = new Set();
+    if (declaring) {
+      G.hands.bottom.forEach(t => {
+        if (isTenpai13(G.hands.bottom.filter(x => x !== t))) keepSet.add(t);
+      });
+    }
+    const decorate = (el, tile) => {
+      if (declaring) el.classList.add(keepSet.has(tile) ? 'tile--riichi-ok' : 'tile--dimmed');
+      el.addEventListener('click', () => onMyHandClick(tile));
+      el.addEventListener('dblclick', () => onMyHandDblClick(tile));
+      if (G.selected === tile) el.classList.add('tile--selected');
+    };
     sorted.forEach(tile => {
       const el = createTileEl(tile, { mine: true });
-      el.addEventListener('click', () => onMyHandClick(tile));
-      if (G.selected === tile) el.classList.add('tile--selected');
+      decorate(el, tile);
       container.appendChild(el);
     });
     if (drawnTile) {
@@ -708,8 +721,7 @@ function renderHand(seat) {
       sep.style.cssText = 'width:6px;display:inline-block;';
       container.appendChild(sep);
       const el = createTileEl(drawnTile, { mine: true, justDrawn: true });
-      el.addEventListener('click', () => onMyHandClick(drawnTile));
-      if (G.selected === drawnTile) el.classList.add('tile--selected');
+      decorate(el, drawnTile);
       container.appendChild(el);
     }
     // 抜いた北: 手牌の右端に 少し間隔を空けて 並べる
@@ -933,24 +945,27 @@ function updateHint() {
       const waits = waitingIds(rest);
       const selName = `${TILE_NAMES[G.selected.id]}${G.selected.isRed ? '(赤)' : ''}`;
       if (waits.length > 0) {
-        const names = waits.map(id => TILE_NAMES[id]).join('・');
         const furiten = G.rivers.bottom.some(t => waits.includes(t.id));
-        hint.textContent = `🎯 ${selName}を切ると テンパイ! 待ち: ${names}${furiten ? ' ⚠️フリテン(ロン不可)' : ''}`;
+        const head = (G.justRiichiDeclared === 'bottom') ? 'を切って リーチ!' : 'を切ると テンパイ!';
+        hint.textContent = `🎯 ${selName}${head} 待ち: ${waitsLabel(waits)}${furiten ? ' ⚠️フリテン(ロン不可)' : ''}`;
+      } else if (G.justRiichiDeclared === 'bottom') {
+        hint.textContent = `🟢 ${selName}では リーチできません — 光っている牌から選んでください`;
       } else {
         const sh = shantenOf(rest);
         hint.textContent = `${selName} 選択中 — 切ると テンパイまで あと${sh}枚`;
       }
+    } else if (G.justRiichiDeclared === 'bottom') {
+      hint.textContent = '🟢 光っている牌を捨てると リーチ成立 / やめるなら 「リーチ取消」';
     } else if (hasKita) {
       hint.textContent = '👆 牌タップ → 「打牌」 / 北 (🀃) は 「北抜き」 もOK';
     } else {
-      hint.textContent = '👆 手牌から捨てる牌をタップ → 「打牌」';
+      hint.textContent = '👆 手牌から捨てる牌をタップ → 「打牌」 (ダブルクリックで即打牌)';
     }
   } else if (G.hands.bottom.length === 13) {
     const waits = waitingIds(G.hands.bottom);
     if (waits.length > 0) {
-      const names = waits.map(id => TILE_NAMES[id]).join('・');
       const furiten = G.rivers.bottom.some(t => waits.includes(t.id)) || G.passFuriten || G.tempFuriten;
-      hint.textContent = `🎯 テンパイ中! 待ち: ${names}${furiten ? ' ⚠️フリテン(ロン不可)' : ''}`;
+      hint.textContent = `🎯 テンパイ中! 待ち: ${waitsLabel(waits)}${furiten ? ' ⚠️フリテン(ロン不可)' : ''}`;
     } else {
       hint.textContent = '⏳ ツモ待ち…';
       hint.classList.add('game__hint--idle');
@@ -959,6 +974,21 @@ function updateHint() {
     hint.textContent = '配牌中…';
     hint.classList.add('game__hint--idle');
   }
+}
+
+// ─── 待ち牌表示 (残り枚数付き — 見えている牌を除いた枚数) ────
+function visibleCountOf(id) {
+  let n = 0;
+  G.hands.bottom.forEach(t => { if (t && t.id === id) n++; });
+  for (const s of ALL_SEATS) {
+    G.rivers[s].forEach(t => { if (t && t.id === id) n++; });
+    (G.kitaTiles[s] || []).forEach(t => { if (t && t.id === id) n++; });
+  }
+  if (G.doraIndicator && G.doraIndicator.id === id) n++;
+  return n;
+}
+function waitsLabel(waits) {
+  return waits.map(id => `${TILE_NAMES[id]}(残${Math.max(0, 4 - visibleCountOf(id))})`).join('・');
 }
 
 // ─── アクションボタン ─────────────────────────
@@ -993,11 +1023,21 @@ function updateActionButtons() {
   const passBtn = document.getElementById('btn-pass');
   if (passBtn) passBtn.disabled = !G.pendingRon;
   // リーチ判定: 自分の番、 14牌、 リーチしてない、 1000点以上、 テンパイ (= 1枚捨てたらテンパイ形)
-  let canRiichi = false;
-  if (myTurn && has14 && !G.isRiichi.bottom && G.scores.bottom >= 1000) {
-    canRiichi = canDeclareRiichi(G.hands.bottom);
+  // 宣言直後 (打牌前) は 「リーチ取消」 ボタンとして有効化
+  const riichiBtn = document.getElementById('btn-riichi');
+  if (riichiBtn) {
+    if (G.justRiichiDeclared === 'bottom') {
+      riichiBtn.textContent = 'リーチ取消';
+      riichiBtn.disabled = !(G.turn === 'bottom' && !G.busy);
+    } else {
+      riichiBtn.textContent = 'リーチ';
+      let canRiichi = false;
+      if (myTurn && has14 && !G.isRiichi.bottom && G.scores.bottom >= 1000) {
+        canRiichi = canDeclareRiichi(G.hands.bottom);
+      }
+      riichiBtn.disabled = !canRiichi;
+    }
   }
-  document.getElementById('btn-riichi').disabled = !canRiichi;
 }
 
 // ─── シャンテン数 (テンパイまでの残り枚数、 標準形+七対子+国士の最小) ───
@@ -1145,6 +1185,16 @@ function onMyHandClick(tile) {
   renderHand('bottom');
   updateActionButtons();
   updateHint();
+}
+
+// ダブルクリック = 選択 + 即打牌 (PC向けショートカット。 打牌可否のガードは 打牌ボタン handler に集約)
+function onMyHandDblClick(tile) {
+  if (G.turn !== 'bottom' || G.busy || G.roundOver) return;
+  if (G.hands.bottom.length !== 14) return;
+  if (G.isRiichi.bottom && G.justRiichiDeclared !== 'bottom') return;
+  G.selected = tile;
+  updateActionButtons();  // disabled のままだと click() が発火しないため 先に反映
+  document.getElementById('btn-discard')?.click();
 }
 
 // ─── ツモ動作 ──────────────────────────────────
@@ -2084,6 +2134,17 @@ if (document.getElementById('table')) {
     });
     document.getElementById('btn-riichi')?.addEventListener('click', () => {
       if (G.turn !== 'bottom' || G.busy || G.roundOver) return;
+      // 宣言直後 (宣言牌を捨てる前) は 取消として動作
+      if (G.justRiichiDeclared === 'bottom') {
+        G.isRiichi.bottom = false;
+        G.riichiTurnsLeft.bottom = 0;
+        G.scores.bottom += 1000;
+        G.kyotaku -= 1000;
+        G.justRiichiDeclared = null;
+        toast('リーチを取り消しました (+1000点)');
+        renderAll();
+        return;
+      }
       if (G.isRiichi.bottom || G.scores.bottom < 1000) return;
       if (!canDeclareRiichi(G.hands.bottom)) return;
       if (NETQ() && NETQ().isGuest()) { NETQ().guestAction('riichi'); return; }
@@ -2092,7 +2153,7 @@ if (document.getElementById('table')) {
       G.scores.bottom -= 1000;
       G.kyotaku += 1000;
       G.justRiichiDeclared = 'bottom';  // 次の打牌が リーチ宣言牌 (横向き)
-      toast('リーチ! (-1000点) — テンパイを保てる牌を選んで 「打牌」');
+      toast('リーチ! 光っている牌を捨てると成立 (やめるなら「リーチ取消」)');
       renderAll();
     });
     document.getElementById('end-next')?.addEventListener('click', nextRound);
