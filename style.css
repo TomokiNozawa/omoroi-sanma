@@ -112,15 +112,17 @@ body {
   grid-template-columns: repeat(2, auto);
   grid-auto-flow: column;
   gap: 1px;
-  padding: 2px;
+  padding: 1px;  /* モバイル360pxで 山と接触しないよう最小化 */
 }
 .river-area--left .tile--river, .river-area--right .tile--river {
-  width: 16px;
-  height: 21px;
-  margin: -2.5px 2.5px;
+  width: 15px;
+  height: 20px;
+  margin: -2.5px 2.5px;  /* 回転後のレイアウト箱 = 20×15 */
 }
 .river-area--left .tile { transform: rotate(90deg); }
 .river-area--right .tile { transform: rotate(-90deg); }
+/* 対面の河も 本人にとって正しい向き (=180°、 縦横は変わらないので margin 補正不要) */
+.river-area--top .tile { transform: rotate(180deg); }
 .river-area--bottom {
   top: calc(50% + 38px);
   left: 50%;
@@ -132,12 +134,12 @@ body {
   transform: translateX(-50%);
 }
 .river-area--left {
-  right: calc(50% + 62px);
+  right: calc(50% + 61px);
   top: 50%;
   transform: translateY(-50%);
 }
 .river-area--right {
-  left: calc(50% + 62px);
+  left: calc(50% + 61px);
   top: 50%;
   transform: translateY(-50%);
 }
@@ -264,10 +266,19 @@ body {
 .tile--mini  { width: 14px; height: 19px; }
 .tile--river { width: 18px; height: 24px; }
 /* リーチ宣言牌 = 本人にとって横向き (各河の基本回転 +90°):
-   自家/対面=+90°、 上家=90+90=180°、 下家=-90+90=0° */
+   自家=90°、 対面=180+90=270°、 上家=90+90=180°、 下家=-90+90=0° */
 .tile--riichi-dec { transform: rotate(90deg) !important; }
+.river-area--top .tile--riichi-dec { transform: rotate(270deg) !important; }
 .river-area--left .tile--riichi-dec { transform: rotate(180deg) !important; }
 .river-area--right .tile--riichi-dec { transform: rotate(0deg) !important; }
+/* リーチ宣言モード (雀魂式支援): 捨てるとリーチ成立する牌=緑発光、 それ以外=暗転 */
+.tile--riichi-ok {
+  box-shadow: 0 0 0 2px #4caf50, 0 0 12px rgba(76,175,80,0.95);
+}
+.tile--dimmed {
+  opacity: 0.35;
+  filter: grayscale(60%);
+}
 /* 最新の打牌 = オレンジ発光 (どの牌が今捨てられたか一目で分かる) */
 .tile--latest {
   box-shadow: 0 0 0 2px #ff9800, 0 0 10px rgba(255,152,0,0.9);
