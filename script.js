@@ -81,6 +81,8 @@ const G = {
   // フリテン (自家がロンを見逃した場合)
   passFuriten: false,   // リーチ中に見逃し → この局ずっとロン不可
   tempFuriten: false,   // 見逃し → 次の自摸まで ロン不可
+  // 最新の打牌 (河でハイライト表示する)
+  lastDiscard: null,
 };
 
 // ─── 牌生成 + シャッフル ───────────────────────
@@ -700,18 +702,15 @@ function renderHand(seat) {
   }
 }
 
-// ─── 描画: 河 (top/left は DOM逆順で 新しい牌が中央寄りに) ──
+// ─── 描画: 河 (全席 正立・時系列順、 最新打牌はハイライト) ──
 function renderRiver(seat) {
   const container = document.getElementById(`river-${seat}`);
   if (!container) return;
   container.innerHTML = '';
-  // top と left は 「中央寄り = 新しい牌」 になるよう 逆順で
-  let arr = G.rivers[seat];
-  if (seat === 'top' || seat === 'left') {
-    arr = [...arr].reverse();
-  }
-  arr.forEach(tile => {
-    container.appendChild(createTileEl(tile, { river: true }));
+  G.rivers[seat].forEach(tile => {
+    const el = createTileEl(tile, { river: true });
+    if (tile === G.lastDiscard) el.classList.add('tile--latest');
+    container.appendChild(el);
   });
 }
 
@@ -800,7 +799,7 @@ function renderWalls() {
 // ─── 描画: ヘッダ + 中央 ───────────────────────
 function renderHeader() {
   document.getElementById('game-round').textContent = `${G.round}局 ${G.honba}本場`;
-  document.getElementById('center-round').textContent = G.round;
+  document.getElementById('center-round').textContent = G.round + (G.honba > 0 ? `・${G.honba}本場` : '');
   const remain = G.drawTiles.length;
   document.getElementById('game-remain').textContent = `山残: ${remain}`;
   const cr = document.getElementById('center-remain');
@@ -830,6 +829,8 @@ function renderSeats() {
     label += ` ${G.scores[seat].toLocaleString()}点`;
     if (G.isRiichi[seat]) label += ' 🔴リーチ';
     labelEl.textContent = label;
+    // 手番の家をハイライト
+    labelEl.classList.toggle('seat__label--turn', G.turn === seat && !G.roundOver);
   });
 }
 
@@ -1008,6 +1009,7 @@ function discardTile(seat, tile) {
     G.justRiichiDeclared = null;
   }
   G.rivers[seat].push(tile);
+  G.lastDiscard = tile;
   if (seat === 'bottom') {
     G.selected = null;
     G.justDrawn = null;
@@ -1502,6 +1504,7 @@ function startNewRound() {
   G.roundOver = false;
   G.passFuriten = false;
   G.tempFuriten = false;
+  G.lastDiscard = null;
   const nextBtn = document.getElementById('end-next');
   if (nextBtn) nextBtn.style.display = '';
   renderAll();
@@ -1644,7 +1647,7 @@ const GUIDE_STEPS = [
   { title: '🟡 卓全体で1つの山', text: '4家それぞれ前に27牌の山。 ツモは 起点家のカット位置から反時計回りに進みます。' },
   { title: '🀃 北抜き', text: '北 (🀃) を引いたら「北抜き」 で抜き、 王牌末尾 (嶺上) から補充自摸。 抜くたび1翻 (関西ルール)。' },
   { title: '✨ 全部赤ドラ', text: '5筒×4枚 + 5索×4枚 = 計8枚 全赤ドラ。 引いただけで 1翻ずつ加算。' },
-  { title: 'はじめよう!', text: '牌タップ→「打牌」 で捨てる。 ターンは 反時計回り (あなた→下家→対面→上家)、 空席はスキップ。 3・3・3・3・2 を作るのが目的!' }
+  { title: 'はじめよう!', text: '牌タップ→「打牌」 で捨てる。 ターンは 反時計回り、 空席はスキップ。 3・3・3・3・2 を作るのが目的! オレンジに光る牌が 最新の捨て牌。 PCなら ←→ で牌選択、 Enter で打牌もOK。' }
 ];
 let guideIdx = 0;
 
@@ -1793,5 +1796,44 @@ if (document.getElementById('table')) {
     });
     document.getElementById('end-next')?.addEventListener('click', nextRound);
     document.getElementById('dice-ok')?.addEventListener('click', closeDiceCeremony);
+
+    // キーボード操作 (PC): ←→=牌選択 / Enter・Space=打牌 / R=リーチ / T=ツモ / L=ロン / P=パス / K=北抜き / Esc=ガイド閉じ
+    document.addEventListener('keydown', (e) => {
+      const guideOv = document.getElementById('guide-overlay');
+      if (e.key === 'Escape') {
+        if (guideOv && !guideOv.hidden) finishGuide();
+        return;
+      }
+      if (guideOv && !guideOv.hidden) return;  // ガイド表示中は他キー無効
+      const clickIf = (id) => {
+        const b = document.getElementById(id);
+        if (b && !b.disabled) b.click();
+      };
+      if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+        e.preventDefault();
+        if (G.turn !== 'bottom' || G.busy || G.roundOver) return;
+        if (G.hands.bottom.length !== 14) return;
+        if (G.isRiichi.bottom && G.justRiichiDeclared !== 'bottom') return;  // リーチ後は選択不可
+        // 表示順 (ソート済 + ツモ牌が末尾) で 選択を移動
+        const displayed = sortHand(G.hands.bottom.filter((_, i) => i !== G.justDrawn));
+        if (G.justDrawn != null && G.hands.bottom[G.justDrawn]) displayed.push(G.hands.bottom[G.justDrawn]);
+        if (displayed.length === 0) return;
+        let idx = displayed.indexOf(G.selected);
+        idx = (e.key === 'ArrowRight')
+          ? (idx + 1) % displayed.length
+          : (idx <= 0 ? displayed.length - 1 : idx - 1);
+        G.selected = displayed[idx];
+        renderHand('bottom');
+        updateActionButtons();
+        updateHint();
+      } else if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        clickIf('btn-discard');
+      } else if (e.key === 'r' || e.key === 'R') clickIf('btn-riichi');
+      else if (e.key === 't' || e.key === 'T') clickIf('btn-tsumo');
+      else if (e.key === 'l' || e.key === 'L') clickIf('btn-ron');
+      else if (e.key === 'p' || e.key === 'P') clickIf('btn-pass');
+      else if (e.key === 'k' || e.key === 'K') clickIf('btn-kita');
+    });
   });
 }
