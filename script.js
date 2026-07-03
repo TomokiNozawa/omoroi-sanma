@@ -866,15 +866,33 @@ function updateHint() {
   if (G.hands.bottom.length === 14) {
     const hasKita = G.hands.bottom.some(t => t.id === KITA_ID);
     if (G.selected) {
-      hint.textContent = `🎯 ${TILE_NAMES[G.selected.id]}${G.selected.isRed ? ' (赤)' : ''} 選択中 — 「打牌」 で捨てる`;
+      // 待ち牌プレビュー: 選択牌を切った後の形を先読み表示 (初心者ガイドの核)
+      const rest = G.hands.bottom.filter(t => t !== G.selected);
+      const waits = waitingIds(rest);
+      const selName = `${TILE_NAMES[G.selected.id]}${G.selected.isRed ? '(赤)' : ''}`;
+      if (waits.length > 0) {
+        const names = waits.map(id => TILE_NAMES[id]).join('・');
+        const furiten = G.rivers.bottom.some(t => waits.includes(t.id));
+        hint.textContent = `🎯 ${selName}を切ると テンパイ! 待ち: ${names}${furiten ? ' ⚠️フリテン(ロン不可)' : ''}`;
+      } else {
+        const sh = shantenOf(rest);
+        hint.textContent = `${selName} 選択中 — 切ると テンパイまで あと${sh}枚`;
+      }
     } else if (hasKita) {
       hint.textContent = '👆 牌タップ → 「打牌」 / 北 (🀃) は 「北抜き」 もOK';
     } else {
       hint.textContent = '👆 手牌から捨てる牌をタップ → 「打牌」';
     }
   } else if (G.hands.bottom.length === 13) {
-    hint.textContent = '⏳ ツモ待ち…';
-    hint.classList.add('game__hint--idle');
+    const waits = waitingIds(G.hands.bottom);
+    if (waits.length > 0) {
+      const names = waits.map(id => TILE_NAMES[id]).join('・');
+      const furiten = G.rivers.bottom.some(t => waits.includes(t.id)) || G.passFuriten || G.tempFuriten;
+      hint.textContent = `🎯 テンパイ中! 待ち: ${names}${furiten ? ' ⚠️フリテン(ロン不可)' : ''}`;
+    } else {
+      hint.textContent = '⏳ ツモ待ち…';
+      hint.classList.add('game__hint--idle');
+    }
   } else {
     hint.textContent = '配牌中…';
     hint.classList.add('game__hint--idle');
@@ -918,6 +936,83 @@ function updateActionButtons() {
     canRiichi = canDeclareRiichi(G.hands.bottom);
   }
   document.getElementById('btn-riichi').disabled = !canRiichi;
+}
+
+// ─── シャンテン数 (テンパイまでの残り枚数、 標準形+七対子+国士の最小) ───
+// 13牌: 0=テンパイ、 1=あと1枚、 ... / 14牌: -1=あがり形
+function seqPartialOk(a, b) {
+  // a<b が 同色数牌の 両面/嵌張 塔子になれるか (萬子は1m/9mのみで塔子不可)
+  const na = tileNum(a), nb = tileNum(b);
+  if (na == null || nb == null) return false;
+  const sameSuit = (isPinId(a) && isPinId(b)) || (isSouId(a) && isSouId(b));
+  return sameSuit && (nb - na === 1 || nb - na === 2);
+}
+function shantenStandardFrom(countsObj) {
+  const c = new Array(27).fill(0);
+  for (const k in countsObj) c[k] = countsObj[k];
+  let best = 8;
+  function rec(start, melds, partials, hasPair) {
+    let i = start;
+    while (i < 27 && c[i] === 0) i++;
+    if (i >= 27) {
+      const s = 8 - 2 * melds - Math.min(partials, 4 - melds) - (hasPair ? 1 : 0);
+      if (s < best) best = s;
+      return;
+    }
+    if (melds < 4) {
+      // 刻子
+      if (c[i] >= 3) { c[i] -= 3; rec(i, melds + 1, partials, hasPair); c[i] += 3; }
+      // 順子
+      if (SHUNTSU_HEAD_IDS.includes(i) && c[i + 1] > 0 && c[i + 2] > 0) {
+        c[i]--; c[i + 1]--; c[i + 2]--;
+        rec(i, melds + 1, partials, hasPair);
+        c[i]++; c[i + 1]++; c[i + 2]++;
+      }
+    }
+    // 対子 (雀頭 or 部分面子)
+    if (c[i] >= 2) {
+      c[i] -= 2;
+      if (!hasPair) rec(i, melds, partials, true);
+      if (melds + partials < 4) rec(i, melds, partials + 1, hasPair);
+      c[i] += 2;
+    }
+    // 塔子 (両面/嵌張)
+    if (melds + partials < 4) {
+      if (i + 1 < 27 && c[i + 1] > 0 && seqPartialOk(i, i + 1)) {
+        c[i]--; c[i + 1]--; rec(i, melds, partials + 1, hasPair); c[i]++; c[i + 1]++;
+      }
+      if (i + 2 < 27 && c[i + 2] > 0 && seqPartialOk(i, i + 2)) {
+        c[i]--; c[i + 2]--; rec(i, melds, partials + 1, hasPair); c[i]++; c[i + 2]++;
+      }
+    }
+    // この牌を使わない (孤立牌扱い)
+    const saved = c[i];
+    c[i] = 0;
+    rec(i + 1, melds, partials, hasPair);
+    c[i] = saved;
+  }
+  rec(0, 0, 0, false);
+  return best;
+}
+function shantenChiitoi(countsObj) {
+  let pairs = 0, kinds = 0;
+  for (const k in countsObj) {
+    if (countsObj[k] > 0) { kinds++; if (countsObj[k] >= 2) pairs++; }
+  }
+  return 6 - pairs + Math.max(0, 7 - kinds);
+}
+function shantenKokushi(countsObj) {
+  let kinds = 0, hasPair = false;
+  for (const id of KOKUSHI_IDS) {
+    const n = countsObj[id] || 0;
+    if (n > 0) kinds++;
+    if (n >= 2) hasPair = true;
+  }
+  return 13 - kinds - (hasPair ? 1 : 0);
+}
+function shantenOf(hand) {
+  const counts = countTiles(hand);
+  return Math.min(shantenStandardFrom(counts), shantenChiitoi(counts), shantenKokushi(counts));
 }
 
 // ─── テンパイ判定 (1枚捨てたら 13牌が 聴牌か) ─────
@@ -1010,6 +1105,7 @@ function discardTile(seat, tile) {
   }
   G.rivers[seat].push(tile);
   G.lastDiscard = tile;
+  playSE('discard');
   if (seat === 'bottom') {
     G.selected = null;
     G.justDrawn = null;
@@ -1029,6 +1125,7 @@ function discardTile(seat, tile) {
         // 自家ロン: ボタン待ち
         G.pendingRon = { fromSeat: seat, tile };
         G.busy = true;
+        playSE('alert');
         toast(`ロン可! 「ロン」 ボタンで あがれます`);
       } else {
         // CPU ロン: 自動宣言 (roundOver で 以降のターン進行を停止)
@@ -1054,6 +1151,7 @@ function kitaNuki(seat) {
   const replacement = G.kingTiles.pop();
   G.hands[seat].push(replacement);
   if (seat === 'bottom') G.justDrawn = G.hands[seat].length - 1;
+  playSE('kita');
   toast(`${SEAT_LABEL_BASE[seat]} 北抜き (+1翻) / 抜き合計 ${G.kitas[seat]}`);
   return true;
 }
@@ -1117,6 +1215,7 @@ function handleRiichiAutoBottom() {
     canTsumoNow = !result.error && (result.han > 0 || result.isYakuman);
   }
   if (canTsumoNow) {
+    playSE('alert');
     toast('ツモできます! 「ツモ」 ボタンを押してください');
     return;  // ボタン待ち (updateActionButtons が ツモを有効化)
   }
@@ -1157,6 +1256,7 @@ function cpuPlay(seat) {
       G.scores[seat] -= 1000;
       G.kyotaku += 1000;
       G.justRiichiDeclared = seat;  // 宣言ターン = この打牌が リーチ宣言牌 (横向き)
+      playSE('riichi');
       toast(`${SEAT_LABEL_BASE[seat]} リーチ! (-1000点)`);
       // ※ 宣言ターンは テンパイ維持できる牌のみ捨てる (cpuDiscard 側で制限)
     }
@@ -1209,20 +1309,29 @@ function cpuDiscard(seat, forceTsumoTile = false) {
     const keep = pool.filter(t => isTenpai13(G.hands[seat].filter(x => x !== t)));
     if (keep.length > 0) pool = keep;
   }
+  // シャンテン数が最小になる捨て牌を選ぶ (= 手が進む打牌)。
+  // 強すぎ防止: 15% の確率で 「min+1 まで許容」 の気まぐれ打牌
+  const evals = pool.map(t => ({ t, sh: shantenOf(G.hands[seat].filter(x => x !== t)) }));
+  const minSh = Math.min(...evals.map(e => e.sh));
+  let cands = evals.filter(e => e.sh === minSh).map(e => e.t);
+  if (Math.random() < 0.15) {
+    cands = evals.filter(e => e.sh <= minSh + 1).map(e => e.t);
+  }
+  // 同率タイブレーク: 孤立字牌 → 端牌 → 候補の末尾 (安全度は未実装の簡略AI)
   const counts = {};
-  pool.forEach(t => { counts[t.id] = (counts[t.id] || 0) + 1; });
+  G.hands[seat].forEach(t => { counts[t.id] = (counts[t.id] || 0) + 1; });
   let target = null;
   for (let id = 20; id <= 26; id++) {
     if (id === KITA_ID) continue;
-    if (counts[id] === 1) { target = pool.find(t => t.id === id); break; }
+    if (counts[id] === 1) { target = cands.find(t => t.id === id); if (target) break; }
   }
   if (!target) {
     const ends = [0, 1, 2, 10, 11, 19];
     for (const id of ends) {
-      if (counts[id] === 1) { target = pool.find(t => t.id === id); break; }
+      if (counts[id] === 1) { target = cands.find(t => t.id === id); if (target) break; }
     }
   }
-  if (!target) target = pool[pool.length - 1];
+  if (!target) target = cands[cands.length - 1];
   discardTile(seat, target);
   toast(`${SEAT_LABEL_BASE[seat]} が ${TILE_NAMES[target.id]} を打牌`);
   renderAll();
@@ -1328,6 +1437,7 @@ function showWinModal(seat, hand, context, result) {
   const textEl = document.getElementById('end-text');
   if (!overlay || !titleEl || !textEl) return;
   G.roundOver = true;
+  playSE('win');
 
   // 点数移動 (現在の本場で計算) → その後 連荘/本場 更新
   const transfers = applyWinScore(seat, context, result);
@@ -1629,6 +1739,42 @@ function closeDiceCeremony() {
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
+// ─── 効果音 (Web Audio 合成 — 音声ファイル不要、 再生時以外は処理ゼロで省電力) ──
+let _audioCtx = null;
+let seMuted = false;
+function _seCtx() {
+  if (seMuted) return null;
+  try {
+    if (!_audioCtx) _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (_audioCtx.state === 'suspended') _audioCtx.resume();
+    return _audioCtx;
+  } catch (e) { return null; }
+}
+function _tone(ctx, freq, t0, dur, vol, type = 'sine') {
+  const o = ctx.createOscillator();
+  const g = ctx.createGain();
+  o.type = type;
+  o.frequency.value = freq;
+  g.gain.setValueAtTime(vol, t0);
+  g.gain.exponentialRampToValueAtTime(0.001, t0 + dur);
+  o.connect(g);
+  g.connect(ctx.destination);
+  o.start(t0);
+  o.stop(t0 + dur);
+}
+function playSE(kind) {
+  const ctx = _seCtx();
+  if (!ctx) return;
+  try {
+    const t = ctx.currentTime;
+    if (kind === 'discard')      _tone(ctx, 1700, t, 0.045, 0.10, 'square');
+    else if (kind === 'kita')    { _tone(ctx, 620, t, 0.08, 0.14); _tone(ctx, 930, t + 0.07, 0.10, 0.14); }
+    else if (kind === 'riichi')  { _tone(ctx, 880, t, 0.12, 0.18); _tone(ctx, 1320, t + 0.11, 0.18, 0.18); }
+    else if (kind === 'alert')   { _tone(ctx, 1046, t, 0.15, 0.22); _tone(ctx, 1568, t + 0.13, 0.20, 0.22); }
+    else if (kind === 'win')     [523, 659, 784, 1046].forEach((f, i) => _tone(ctx, f, t + i * 0.09, 0.25, 0.18));
+  } catch (e) { /* 音は失敗しても ゲーム進行を止めない */ }
+}
+
 // ─── トースト ──────────────────────────────
 let toastTimer = null;
 function toast(text) {
@@ -1690,6 +1836,14 @@ if (document.getElementById('app-version')) {
   document.addEventListener('DOMContentLoaded', loadLobbyVersion);
 }
 
+// ─── Service Worker 登録 (オフライン対応 + 通信料削減: 牌画像/CSS/JS をキャッシュ) ──
+if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator
+    && location.protocol && location.protocol.startsWith('http')) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  });
+}
+
 // ─── ゲーム初期化 ─────────────────────────
 function initGame() {
   const params = new URLSearchParams(location.search);
@@ -1711,6 +1865,19 @@ function initGame() {
 if (document.getElementById('table')) {
   document.addEventListener('DOMContentLoaded', () => {
     initGame();
+    // 効果音 ON/OFF トグル (端末ごとの表示設定なので localStorage 保持)
+    seMuted = localStorage.getItem('omoroi-se-muted') === '1';
+    const seBtn = document.getElementById('se-btn');
+    if (seBtn) {
+      seBtn.textContent = seMuted ? '🔇' : '🔊';
+      seBtn.addEventListener('click', () => {
+        seMuted = !seMuted;
+        localStorage.setItem('omoroi-se-muted', seMuted ? '1' : '0');
+        seBtn.textContent = seMuted ? '🔇' : '🔊';
+        toast(seMuted ? '効果音 OFF' : '効果音 ON');
+        if (!seMuted) playSE('kita');
+      });
+    }
     document.getElementById('guide-next')?.addEventListener('click', () => {
       guideIdx++;
       if (guideIdx >= GUIDE_STEPS.length) finishGuide();
