@@ -983,11 +983,55 @@ function waitsLabel(waits) {
 function renderRiichiGuide() {
   const el = document.getElementById('riichi-guide');
   if (!el) return;
-  // 表示条件: リーチ成立後 (宣言牌打牌済) のみ。 宣言中は 選択プレビューに委ねる
-  if (!G.isRiichi.bottom || G.justRiichiDeclared === 'bottom' || G.roundOver) {
+  if (!G.isRiichi.bottom || G.roundOver) {
     el.hidden = true;
     return;
   }
+  // ガイド本体を組み立てる共通部品
+  const build = (labelText, waits, withFuriten) => {
+    el.innerHTML = '';
+    const lab = document.createElement('span');
+    lab.className = 'riichi-guide__label';
+    lab.textContent = labelText;
+    el.appendChild(lab);
+    waits.forEach(id => {
+      el.appendChild(createTileEl({ id, copy: 0, isRed: false }, { mini: true }));
+      const c = document.createElement('span');
+      c.className = 'riichi-guide__count';
+      c.textContent = `残${Math.max(0, 4 - visibleCountOf(id))}`;
+      el.appendChild(c);
+    });
+    if (withFuriten) {
+      const furiten = G.rivers.bottom.some(t => waits.includes(t.id)) || G.passFuriten || G.tempFuriten;
+      if (furiten) {
+        const f = document.createElement('span');
+        f.className = 'riichi-guide__furiten';
+        f.textContent = '⚠️フリテン(ロン不可)';
+        el.appendChild(f);
+      }
+    }
+    el.hidden = false;
+  };
+
+  // ① リーチ宣言中 (宣言牌を選んでいる最中): 選択中の候補牌で あがり牌をプレビュー
+  if (G.justRiichiDeclared === 'bottom') {
+    const keepers = G.hands.bottom.filter(t => isTenpai13(G.hands.bottom.filter(x => x !== t)));
+    if (keepers.length === 0) { el.hidden = true; return; }
+    const target = (G.selected && keepers.includes(G.selected)) ? G.selected : keepers[0];
+    const waits = waitingIds(G.hands.bottom.filter(t => t !== target));
+    if (waits.length === 0) { el.hidden = true; return; }
+    const multi = keepers.length > 1 ? ' (光る牌タップで切替)' : '';
+    build(`🔴${TILE_NAMES[target.id]}を切ると → あがり牌:`, waits, true);
+    if (multi) {
+      const m = document.createElement('span');
+      m.className = 'riichi-guide__count';
+      m.textContent = multi;
+      el.appendChild(m);
+    }
+    return;
+  }
+
+  // ② リーチ成立後: 確定した待ちを常時表示
   // 14枚時 (ツモ直後の自動処理中) は ツモ牌を除いた 13枚で待ちを計算
   const base = (G.hands.bottom.length === 14 && G.justDrawn != null)
     ? G.hands.bottom.filter((_, i) => i !== G.justDrawn)
@@ -995,26 +1039,7 @@ function renderRiichiGuide() {
   if (base.length !== 13) { el.hidden = true; return; }
   const waits = waitingIds(base);
   if (waits.length === 0) { el.hidden = true; return; }
-  el.innerHTML = '';
-  const lab = document.createElement('span');
-  lab.className = 'riichi-guide__label';
-  lab.textContent = '🔴リーチ中 — あがり牌:';
-  el.appendChild(lab);
-  waits.forEach(id => {
-    el.appendChild(createTileEl({ id, copy: 0, isRed: false }, { mini: true }));
-    const c = document.createElement('span');
-    c.className = 'riichi-guide__count';
-    c.textContent = `残${Math.max(0, 4 - visibleCountOf(id))}`;
-    el.appendChild(c);
-  });
-  const furiten = G.rivers.bottom.some(t => waits.includes(t.id)) || G.passFuriten || G.tempFuriten;
-  if (furiten) {
-    const f = document.createElement('span');
-    f.className = 'riichi-guide__furiten';
-    f.textContent = '⚠️フリテン(ロン不可)';
-    el.appendChild(f);
-  }
-  el.hidden = false;
+  build('🔴リーチ中 — あがり牌:', waits, true);
 }
 
 // ─── アクションボタン ─────────────────────────
@@ -1209,6 +1234,7 @@ function onMyHandClick(tile) {
   }
   G.selected = (G.selected === tile) ? null : tile;
   renderHand('bottom');
+  renderRiichiGuide();
   updateActionButtons();
   updateHint();
 }
@@ -2155,6 +2181,7 @@ if (document.getElementById('table')) {
         G.scores.bottom += 1000;
         G.kyotaku -= 1000;
         G.justRiichiDeclared = null;
+        G.selected = null;
         toast('リーチを取り消しました (+1000点)');
         renderAll();
         return;
@@ -2166,6 +2193,10 @@ if (document.getElementById('table')) {
       G.scores.bottom -= 1000;
       G.kyotaku += 1000;
       G.justRiichiDeclared = 'bottom';  // 次の打牌が リーチ宣言牌 (横向き)
+      // 先頭の候補牌を自動選択 → あがり牌ガイドが即表示される (雀魂式)
+      const dispOrder = sortHand(G.hands.bottom.filter((_, i) => i !== G.justDrawn));
+      if (G.justDrawn != null && G.hands.bottom[G.justDrawn]) dispOrder.push(G.hands.bottom[G.justDrawn]);
+      G.selected = dispOrder.find(t => isTenpai13(G.hands.bottom.filter(x => x !== t))) || null;
       toast('リーチ! 光っている牌を捨てると成立 (やめるなら「リーチ取消」)');
       renderAll();
     });
@@ -2216,6 +2247,7 @@ if (document.getElementById('table')) {
           : (idx <= 0 ? displayed.length - 1 : idx - 1);
         G.selected = displayed[idx];
         renderHand('bottom');
+        renderRiichiGuide();
         updateActionButtons();
         updateHint();
       } else if (e.key === 'Enter' || e.key === ' ') {
