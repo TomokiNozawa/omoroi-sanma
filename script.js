@@ -97,6 +97,21 @@ function seatLabel(seat) {
   const n = NETQ();
   return (n && n.seatDispName) ? n.seatDispName(seat) : SEAT_LABEL_BASE[seat];
 }
+// 結果モーダル等 「全クライアント共有テキスト」 用の席名。
+// net対戦では 視点語 (下家/あなた等) を使わず 絶対名 (プレイヤー名/CPU①) にする
+// (ホストが生成した html を ゲストもそのまま見るため、 視点語だとホスト視点になってしまう)
+function seatShareLabel(seat) {
+  const n = NETQ();
+  if (n && n.isHost && n.isHost() && n.pubName) return n.pubName(seat);
+  return SEAT_LABEL_BASE[seat];
+}
+// 自風 (親=東 から反時計回りに 南・西、 空席は風なし)
+function seatWindOf(seat) {
+  if (!G.oya || seat === G.emptySeat) return '';
+  const order = ccwFrom(G.oya).filter(s => s !== G.emptySeat);
+  const i = order.indexOf(seat);
+  return ['東', '南', '西'][i] || '';
+}
 // リモート席のロンオファー待ちか (ターン進行の追加ガード)
 function netOfferPending() {
   const n = NETQ();
@@ -533,17 +548,17 @@ function countYakuhai(hand, context) {
     }
   }
   // 場風: 東場=東 (id=20)、 南場=南 (id=21)
-  if ((counts[20] || 0) >= 3) {
-    if (context.round && context.round.startsWith('東')) {
-      yakus.push({ name: '場風 東', han: 1 });
-    }
-    // 親なら自風東 (簡略: 自風は親=東のみ実装)
-    if (context.isOya) {
-      yakus.push({ name: '自風 東', han: 1 });
-    }
+  if ((counts[20] || 0) >= 3 && context.round && context.round.startsWith('東')) {
+    yakus.push({ name: '場風 東', han: 1 });
   }
   if ((counts[21] || 0) >= 3 && context.round && context.round.startsWith('南')) {
     yakus.push({ name: '場風 南', han: 1 });
+  }
+  // 自風: 東=20 / 南=21 / 西=22 (seatWind 未指定の旧呼び出しは 親=東 のみ)
+  const sw = context.seatWind || (context.isOya ? '東' : null);
+  const swId = { '東': 20, '南': 21, '西': 22 }[sw];
+  if (swId && (counts[swId] || 0) >= 3) {
+    yakus.push({ name: `自風 ${sw}`, han: 1 });
   }
   return yakus;
 }
@@ -910,6 +925,8 @@ function renderSeats() {
     let label = seatLabel(seat);
     if (seat !== 'bottom' && label === SEAT_LABEL_BASE[seat]) label += ' (CPU)';
     if (G.oya === seat) label += '【親】';
+    const wind = seatWindOf(seat);
+    if (wind) label = `${wind}・${label}`;
     label += ` ${G.scores[seat].toLocaleString()}点`;
     if (G.isRiichi[seat]) label += ' 🔴リーチ';
     labelEl.textContent = label;
@@ -1084,7 +1101,7 @@ function updateActionButtons() {
   if (myTurn && has14 && G.justRiichiDeclared !== 'bottom') {
     if (isWinning(G.hands.bottom)) {
       const result = calcYaku(G.hands.bottom, {
-        isTsumo: true, isRiichi: G.isRiichi.bottom, isOya: G.oya === 'bottom',
+        isTsumo: true, isRiichi: G.isRiichi.bottom, isOya: G.oya === 'bottom', seatWind: seatWindOf('bottom'),
         doraIndicator: G.doraIndicator, kitas: G.kitas.bottom, round: G.round,
         isIppatsu: G.riichiTurnsLeft.bottom > 0, winTile: drawnTile,
       });
@@ -1237,7 +1254,7 @@ function checkRonForSeat(seat, fromSeat, tile) {
   if (isFuriten(seat)) return null;
   if (seat === 'bottom' && (G.passFuriten || G.tempFuriten)) return null;
   const ctx = {
-    isTsumo: false, isRiichi: G.isRiichi[seat], isOya: G.oya === seat,
+    isTsumo: false, isRiichi: G.isRiichi[seat], isOya: G.oya === seat, seatWind: seatWindOf(seat),
     doraIndicator: G.doraIndicator, kitas: G.kitas[seat], round: G.round,
     isIppatsu: G.riichiTurnsLeft[seat] > 0,
     winTile: tile, fromSeat,
@@ -1413,7 +1430,7 @@ function handleRiichiAutoBottom() {
   let canTsumoNow = false;
   if (isWinning(G.hands.bottom)) {
     const result = calcYaku(G.hands.bottom, {
-      isTsumo: true, isRiichi: true, isOya: G.oya === 'bottom',
+      isTsumo: true, isRiichi: true, isOya: G.oya === 'bottom', seatWind: seatWindOf('bottom'),
       doraIndicator: G.doraIndicator, kitas: G.kitas.bottom, round: G.round,
       isIppatsu: G.riichiTurnsLeft.bottom > 0, winTile: drawnTile,
     });
@@ -1483,7 +1500,7 @@ function cpuDiscard(seat, forceTsumoTile = false) {
   if (G.hands[seat].length === 14 && isWinning(G.hands[seat])) {
     const drawn = G.hands[seat][G.hands[seat].length - 1];
     const ctx = {
-      isTsumo: true, isRiichi: G.isRiichi[seat], isOya: G.oya === seat,
+      isTsumo: true, isRiichi: G.isRiichi[seat], isOya: G.oya === seat, seatWind: seatWindOf(seat),
       doraIndicator: G.doraIndicator, kitas: G.kitas[seat], round: G.round,
       isIppatsu: G.riichiTurnsLeft[seat] > 0, winTile: drawn,
     };
@@ -1572,9 +1589,9 @@ function endRound(reason) {
       for (const s of notenSeats) G.scores[s] -= payPer;
       for (const s of tenpaiSeats) G.scores[s] += recvPer;
     }
-    let txt = `山が尽きました。<br>テンパイ: ${tenpaiSeats.map(s => seatLabel(s)).join(', ') || 'なし'}<br>`;
+    let txt = `山が尽きました。<br>テンパイ: ${tenpaiSeats.map(s => seatShareLabel(s)).join(', ') || 'なし'}<br>`;
     txt += `点棒移動: ${notenSeats.length > 0 && tenpaiSeats.length > 0 ? '3000点 ノーテン→テンパイ' : 'なし'}<br>`;
-    txt += `現スコア: ${playingSeats.map(s => `${seatLabel(s)}=${G.scores[s].toLocaleString()}`).join(' / ')}`;
+    txt += `現スコア: ${playingSeats.map(s => `${seatShareLabel(s)}=${G.scores[s].toLocaleString()}`).join(' / ')}`;
     if (G.kyotaku > 0) txt += `<br>供託 ${G.kyotaku}点 は 次のあがり者へ持ち越し`;
     document.getElementById('end-text').innerHTML = txt;
     // 親流れ判定: 親がテンパイなら 連荘、 ノーテンなら 流れる (流局は 常に本場+1)
@@ -1647,7 +1664,9 @@ function showWinModal(seat, hand, context, result) {
   const textEl = document.getElementById('end-text');
   if (!overlay || !titleEl || !textEl) return;
   G.roundOver = true;
-  playSE('win');
+  G.busy = true;
+  // ─ 勝利演出: カットイン+ボイス (announce済) → 全員の手牌を表向き公開して一拍 → リザルト
+  renderAll();
 
   // 点数移動 (現在の本場で計算) → その後 連荘/本場 更新
   const prevHonba = G.honba;
@@ -1661,7 +1680,7 @@ function showWinModal(seat, hand, context, result) {
     G.lastResult = 'koWin';    // 子あがり = 親流れ
   }
 
-  const whoLabel = (seat === 'bottom' && !(NETQ() && NETQ().isHost())) ? 'あなた' : seatLabel(seat);
+  const whoLabel = seatShareLabel(seat);
   const winType = context.isTsumo ? 'ツモ' : 'ロン';
   const tier = hanToTier(result.han, result.isYakuman);
   const isOya = (G.oya === seat);
@@ -1704,7 +1723,7 @@ function showWinModal(seat, hand, context, result) {
   const baseGain = gain - prevKyotaku - honbaAdd;
   const fromLabel = context.isTsumo
     ? (isOya ? `親ツモ — 全員から ${(baseGain / Math.max(1, payerCount)).toLocaleString()}点ずつ` : 'ツモ — 親と子から')
-    : `ロン — ${SEAT_LABEL_BASE[context.fromSeat] || ''} の支払い`;
+    : `ロン — ${seatShareLabel(context.fromSeat) || ''} の支払い`;
   let bannerHtml = '<div style="background:rgba(255,235,59,0.15); border:1px solid rgba(255,235,59,0.5); border-radius:8px; padding:8px 10px; margin:6px 0; text-align:center;">';
   bannerHtml += `<div style="font-size:26px; font-weight:bold; color:#ffeb3b; line-height:1.2;">+${gain.toLocaleString()}<span style="font-size:14px;">点</span></div>`;
   bannerHtml += `<div style="font-size:10px; color:#cde;">${fromLabel}`;
@@ -1764,10 +1783,10 @@ function showWinModal(seat, hand, context, result) {
   html += '<div style="background:rgba(76,175,80,0.12); padding:6px 8px; border-radius:6px; margin:6px 0; text-align:left; font-size:11px;">';
   html += '<b style="color:#4caf50;">点数移動:</b> ';
   html += playing.filter(s => transfers[s] !== 0)
-    .map(s => `${seatLabel(s)} <b style="color:${transfers[s] > 0 ? '#ffeb3b' : '#ff8a80'};">${transfers[s] > 0 ? '+' : ''}${transfers[s].toLocaleString()}</b>`)
+    .map(s => `${seatShareLabel(s)} <b style="color:${transfers[s] > 0 ? '#ffeb3b' : '#ff8a80'};">${transfers[s] > 0 ? '+' : ''}${transfers[s].toLocaleString()}</b>`)
     .join(' / ');
   html += '<br><b style="color:#4caf50;">現スコア:</b> ';
-  html += playing.map(s => `${seatLabel(s)}=${G.scores[s].toLocaleString()}`).join(' / ');
+  html += playing.map(s => `${seatShareLabel(s)}=${G.scores[s].toLocaleString()}`).join(' / ');
   html += '</div>';
   // タブ
   html += '<div style="display:flex; gap:4px; margin-top:8px;">';
@@ -1776,22 +1795,27 @@ function showWinModal(seat, hand, context, result) {
   html += '</div>';
   html += `<div id="win-table-area">${buildTable(defaultTab)}</div>`;
   html += `<p style="margin:8px 0 0; font-size:10px; color:#aac; text-align:left;">※ 30符固定の簡易点数表 (4麻標準)。 黄色行=該当翻数、 📍赤枠=今回の点数 (+本場・供託が加算)</p>`;
-  textEl.innerHTML = html;
-  renderAll();  // 全員の手牌を表向き公開 + ラベル点数更新 (「盤面を見る」用)
-  overlay.hidden = false;
-  // net対戦ホスト: 結果をゲストへ配信
-  if (NETQ()) NETQ().onWinModal(titleEl.textContent, html);
+  // 勝利演出の間 (カットイン ~1.2秒 + 公開手牌をひと目) を置いてから リザルト表示
+  const WIN_REVEAL_MS = 2600;
+  setTimeout(() => {
+    playSE('win');
+    textEl.innerHTML = html;
+    renderAll();  // ラベル点数更新 (「盤面を見る」用)
+    overlay.hidden = false;
+    // net対戦ホスト: 結果をゲストへ配信 (ゲストにも同じ間で届く)
+    if (NETQ()) NETQ().onWinModal(titleEl.textContent, html);
 
-  // タブ クリック
-  document.querySelectorAll('.win-tab').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const tab = btn.dataset.tab;
-      document.querySelectorAll('.win-tab').forEach(b => {
-        b.style.background = (b.dataset.tab === tab) ? '#4caf50' : '#143820';
+    // タブ クリック
+    document.querySelectorAll('.win-tab').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const tab = btn.dataset.tab;
+        document.querySelectorAll('.win-tab').forEach(b => {
+          b.style.background = (b.dataset.tab === tab) ? '#4caf50' : '#143820';
+        });
+        document.getElementById('win-table-area').innerHTML = buildTable(tab);
       });
-      document.getElementById('win-table-area').innerHTML = buildTable(tab);
     });
-  });
+  }, WIN_REVEAL_MS);
 }
 
 // 三麻 半荘 = 東3+南3 = 6局
@@ -1809,7 +1833,7 @@ function nextRound() {
       const playingSeats = ALL_SEATS.filter(s => s !== G.emptySeat);
       const ranked = [...playingSeats].sort((a, b) => G.scores[b] - G.scores[a]);
       document.getElementById('end-text').innerHTML
-        = `東3局〜南3局まで完走しました。<br>最終スコア:<br>${ranked.map((s, i) => `${i + 1}位 ${seatLabel(s)} = ${G.scores[s].toLocaleString()}点`).join('<br>')}`;
+        = `東3局〜南3局まで完走しました。<br>最終スコア:<br>${ranked.map((s, i) => `${i + 1}位 ${seatShareLabel(s)} = ${G.scores[s].toLocaleString()}点`).join('<br>')}`;
       const nextBtn = document.getElementById('end-next');
       if (nextBtn) nextBtn.style.display = 'none';
       G.gameEnded = true;
@@ -2338,7 +2362,7 @@ if (document.getElementById('table')) {
       if (G.justRiichiDeclared === 'bottom') return;  // 宣言牌を捨てる前はツモ不可
       if (G.hands.bottom.length !== 14 || !isWinning(G.hands.bottom)) return;
       const drawnTile = (G.justDrawn != null) ? G.hands.bottom[G.justDrawn] : null;
-      const ctx = { isTsumo: true, isRiichi: G.isRiichi.bottom, isOya: G.oya === 'bottom',
+      const ctx = { isTsumo: true, isRiichi: G.isRiichi.bottom, isOya: G.oya === 'bottom', seatWind: seatWindOf('bottom'),
                     doraIndicator: G.doraIndicator, kitas: G.kitas.bottom, round: G.round,
                     isIppatsu: G.riichiTurnsLeft.bottom > 0, winTile: drawnTile };
       const result = calcYaku(G.hands.bottom, ctx);
@@ -2352,7 +2376,7 @@ if (document.getElementById('table')) {
       if (!G.pendingRon || G.roundOver) return;
       const { tile, fromSeat } = G.pendingRon;
       const test = [...G.hands.bottom, tile];
-      const ctx = { isTsumo: false, isRiichi: G.isRiichi.bottom, isOya: G.oya === 'bottom',
+      const ctx = { isTsumo: false, isRiichi: G.isRiichi.bottom, isOya: G.oya === 'bottom', seatWind: seatWindOf('bottom'),
                     doraIndicator: G.doraIndicator, kitas: G.kitas.bottom, round: G.round,
                     isIppatsu: G.riichiTurnsLeft.bottom > 0, winTile: tile, fromSeat };
       const result = calcYaku(test, ctx);

@@ -54,6 +54,8 @@ const NetGame = (() => {
     if (seat === 'bottom' && S.mode === 'host' && S.started && S.seatNames) return `${base} (あなた)`;
     return base;
   };
+  // 共有テキスト用の絶対名 ((あなた) 等の視点装飾なし)
+  const pubName = (seat) => (S.seatNames && S.seatNames[seat]) || SEAT_LABEL_BASE[seat];
 
   // ─── 待機画面 ─────────────────────────
   function showWaiting(html) {
@@ -166,8 +168,10 @@ const NetGame = (() => {
     G.cpuSeats = seats.slice(guestUids.length, guestUids.length + cpuCount);
     G.emptySeat = seats[2];
     // 表示名 (公開するのは素の名前。 「(あなた)」 は各クライアントが自分の bottom にだけ付ける)
+    // CPU席にも絶対名を付与 (視点語「下家(CPU)」だと ホスト視点の言葉が全員に見えてしまう)
     S.seatNames = { bottom: S.name };
     for (const st of Object.keys(S.remoteSeats)) S.seatNames[st] = S.players[S.remoteSeats[st]].name;
+    G.cpuSeats.forEach((st, i) => { S.seatNames[st] = `CPU${['①', '②'][i] || ''}`; });
     S.started = true;
     S.net.setVal(`rooms/${S.room}/meta/status`, 'playing');
     // ゲストへ座席通知 (秘匿手牌パスに 席情報を先行送信)
@@ -202,6 +206,8 @@ const NetGame = (() => {
       lastDiscardSeat: lastDiscardSeat(),
       seatNames: S.seatNames,
       phase: G.ceremonyActive ? 'dice' : 'play',
+      roundOver: !!G.roundOver,
+      handsOpen: G.roundOver ? G.hands : null,  // 局終了後は全手牌公開 (勝利演出/テンパイ確認)
       dice: (G.diceD1 ? [G.diceD1, G.diceD2] : null),
       ceremonySeq: S.ceremonySeq,
       events: S.events,
@@ -354,7 +360,7 @@ const NetGame = (() => {
     if (!isWinning(G.hands[seat])) return;
     const drawnIdx = (G.justDrawnAll && G.justDrawnAll[seat] != null) ? G.justDrawnAll[seat] : null;
     const ctx = {
-      isTsumo: true, isRiichi: G.isRiichi[seat], isOya: G.oya === seat,
+      isTsumo: true, isRiichi: G.isRiichi[seat], isOya: G.oya === seat, seatWind: seatWindOf(seat),
       doraIndicator: G.doraIndicator, kitas: G.kitas[seat], round: G.round,
       isIppatsu: G.riichiTurnsLeft[seat] > 0,
       winTile: drawnIdx != null ? G.hands[seat][drawnIdx] : null,
@@ -373,7 +379,7 @@ const NetGame = (() => {
     S.pendingOffer = null;
     const test = [...G.hands[seat], tile];
     const ctx = {
-      isTsumo: false, isRiichi: G.isRiichi[seat], isOya: G.oya === seat,
+      isTsumo: false, isRiichi: G.isRiichi[seat], isOya: G.oya === seat, seatWind: seatWindOf(seat),
       doraIndicator: G.doraIndicator, kitas: G.kitas[seat], round: G.round,
       isIppatsu: G.riichiTurnsLeft[seat] > 0, winTile: tile, fromSeat,
     };
@@ -460,10 +466,12 @@ const NetGame = (() => {
     G.rivers = rotKeys(pub.rivers, k);
     ALL_SEATS.forEach(s => { if (!G.rivers[s]) G.rivers[s] = []; });
     // 他家の手牌は 枚数のみ (伏せ牌)、 自分の手は ingestHand で反映
+    // 局終了後 (handsOpen) は全手牌が公開される (勝利演出/テンパイ確認)
     const counts = rotKeys(pub.handCounts, k);
+    const open = pub.handsOpen ? rotKeys(pub.handsOpen, k) : null;
     ALL_SEATS.forEach(s => {
       if (s === 'bottom') return;
-      G.hands[s] = new Array(counts[s] || 0).fill({ id: 0, copy: 0 });
+      G.hands[s] = (open && open[s]) ? open[s] : new Array(counts[s] || 0).fill({ id: 0, copy: 0 });
     });
     G.drawTiles = new Array(pub.remain || 0).fill(null);
     G.kingTiles = new Array(pub.kingRemain || 0).fill(null);
@@ -511,8 +519,8 @@ const NetGame = (() => {
         else G._guestCeremonyCloseWanted = true;
       }
     }
-    // 局終了表示
-    G.roundOver = !!pub.endInfo;
+    // 局終了表示 (roundOver は endInfo より先に立つ = 勝利演出の「手牌公開の間」)
+    G.roundOver = !!pub.roundOver || !!pub.endInfo;
     if (pub.endInfo && !S.endInfoShown) {
       S.endInfoShown = true;
       showGuestEnd(pub.endInfo);
@@ -564,7 +572,7 @@ const NetGame = (() => {
     offerRon, remotePlay, isRemoteSeat, hasOffer,
     isGuest, isHost,
     guestAction, sendDiscard,
-    seatDispName,
+    seatDispName, pubName,
     _S: S,
   };
 })();
