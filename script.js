@@ -1294,6 +1294,7 @@ function discardTile(seat, tile) {
       } else {
         // CPU ロン: 自動宣言 (roundOver で 以降のターン進行を停止)
         const test = [...G.hands[checkSeat], tile];
+        playVoice('ロン!');
         toast(`${SEAT_LABEL_BASE[checkSeat]} ロン! (${TILE_NAMES[tile.id]})`);
         G.busy = true;
         G.roundOver = true;
@@ -1317,6 +1318,7 @@ function kitaNuki(seat) {
   G.hands[seat].push(replacement);
   if (seat === 'bottom') G.justDrawn = G.hands[seat].length - 1;
   playSE('kita');
+  playVoice('キタ');
   toast(`${SEAT_LABEL_BASE[seat]} 北抜き (+1翻) / 抜き合計 ${G.kitas[seat]}`);
   return true;
 }
@@ -1422,6 +1424,7 @@ function cpuPlay(seat) {
       G.kyotaku += 1000;
       G.justRiichiDeclared = seat;  // 宣言ターン = この打牌が リーチ宣言牌 (横向き)
       playSE('riichi');
+      playVoice('リーチ!');
       toast(`${SEAT_LABEL_BASE[seat]} リーチ! (-1000点)`);
       // ※ 宣言ターンは テンパイ維持できる牌のみ捨てる (cpuDiscard 側で制限)
     }
@@ -1450,6 +1453,7 @@ function cpuDiscard(seat, forceTsumoTile = false) {
     };
     const result = calcYaku(G.hands[seat], ctx);
     if (!result.error && (result.han > 0 || result.isYakuman)) {
+      playVoice('ツモ!');
       toast(`${SEAT_LABEL_BASE[seat]} ツモ!`);
       G.roundOver = true;
       showWinModal(seat, G.hands[seat], ctx, result);
@@ -1998,6 +2002,37 @@ function playSE(kind) {
   } catch (e) { /* 音は失敗しても ゲーム進行を止めない */ }
 }
 
+// ─── ボイス (Web Speech API — 端末内蔵の日本語音声で 「リーチ!」 等を発声、 ファイル不要) ──
+let _jpVoice = null;
+function _pickJpVoice() {
+  try {
+    const vs = (typeof window !== 'undefined' && window.speechSynthesis)
+      ? window.speechSynthesis.getVoices() : [];
+    _jpVoice = vs.find(v => v.lang === 'ja-JP' && /Nanami|Haruka|Kyoko|Google 日本語|日本/i.test(v.name))
+      || vs.find(v => v.lang && v.lang.startsWith('ja'))
+      || null;
+  } catch (e) { _jpVoice = null; }
+}
+if (typeof window !== 'undefined' && window.speechSynthesis) {
+  window.speechSynthesis.onvoiceschanged = _pickJpVoice;
+  _pickJpVoice();
+}
+function playVoice(text) {
+  if (seMuted) return;
+  try {
+    if (typeof window === 'undefined' || !window.speechSynthesis) return;
+    if (!_jpVoice) _pickJpVoice();
+    const u = new SpeechSynthesisUtterance(text);
+    if (_jpVoice) u.voice = _jpVoice;
+    u.lang = 'ja-JP';
+    u.rate = 1.2;   // 掛け声らしく 少し速め
+    u.pitch = 1.15;
+    u.volume = 1.0;
+    window.speechSynthesis.cancel();  // 前の発声が残っていたら 打ち切って 即発声
+    window.speechSynthesis.speak(u);
+  } catch (e) { /* ボイス失敗でもゲームは止めない */ }
+}
+
 // ─── トースト ──────────────────────────────
 let toastTimer = null;
 function toast(text) {
@@ -2097,8 +2132,9 @@ if (document.getElementById('table')) {
         seMuted = !seMuted;
         localStorage.setItem('omoroi-se-muted', seMuted ? '1' : '0');
         seBtn.textContent = seMuted ? '🔇' : '🔊';
-        toast(seMuted ? '効果音 OFF' : '効果音 ON');
-        if (!seMuted) playSE('kita');
+        toast(seMuted ? '効果音・ボイス OFF' : '効果音・ボイス ON');
+        if (seMuted) { try { window.speechSynthesis?.cancel(); } catch (e) {} }
+        else playVoice('オン');
       });
     }
     document.getElementById('guide-next')?.addEventListener('click', () => {
@@ -2146,6 +2182,7 @@ if (document.getElementById('table')) {
       const result = calcYaku(G.hands.bottom, ctx);
       if (result.error) { toast(result.error); return; }
       if (result.han === 0 && !result.isYakuman) { toast('役なし'); return; }
+      playVoice('ツモ!');
       showWinModal('bottom', G.hands.bottom, ctx, result);
     });
     document.getElementById('btn-ron')?.addEventListener('click', () => {
@@ -2159,6 +2196,7 @@ if (document.getElementById('table')) {
       if (result.error) { toast(result.error); return; }
       G.pendingRon = null;
       G.busy = false;
+      playVoice('ロン!');
       showWinModal('bottom', test, ctx, result);
     });
     document.getElementById('btn-pass')?.addEventListener('click', () => {
@@ -2193,6 +2231,7 @@ if (document.getElementById('table')) {
       G.scores.bottom -= 1000;
       G.kyotaku += 1000;
       G.justRiichiDeclared = 'bottom';  // 次の打牌が リーチ宣言牌 (横向き)
+      playVoice('リーチ!');
       // 先頭の候補牌を自動選択 → あがり牌ガイドが即表示される (雀魂式)
       const dispOrder = sortHand(G.hands.bottom.filter((_, i) => i !== G.justDrawn));
       if (G.justDrawn != null && G.hands.bottom[G.justDrawn]) dispOrder.push(G.hands.bottom[G.justDrawn]);
