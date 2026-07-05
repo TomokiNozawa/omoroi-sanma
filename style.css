@@ -345,6 +345,25 @@ body {
 .dice-ok { background: #4caf50; color: #fff; border: none; padding: 6px 16px; border-radius: 6px; font-weight: bold; font-size: 12px; cursor: pointer; margin-top: 4px; }
 .dice-ok[hidden] { display: none; }
 
+/* ── リーチ中の待ち牌ガイド (手牌の上に常時表示) ── */
+.riichi-guide {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(0,0,0,0.65);
+  border: 1px solid rgba(255,82,82,0.65);
+  border-radius: 12px;
+  padding: 4px 12px;
+  margin-bottom: 2px;
+  font-size: 11px;
+  color: #ffecb3;
+  white-space: nowrap;
+}
+.riichi-guide[hidden] { display: none; }
+.riichi-guide__label { font-weight: bold; color: #ff8a80; margin-right: 2px; }
+.riichi-guide__count { color: #ffeb3b; font-size: 10px; margin-right: 5px; }
+.riichi-guide__furiten { color: #ff8a80; font-size: 10px; font-weight: bold; margin-left: 4px; }
+
 /* ── 盤面を見る ⇄ 結果に戻る (局終了時の一時閉じ) ── */
 .peek-return {
   position: fixed;
