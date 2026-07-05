@@ -1268,10 +1268,12 @@ function discardTile(seat, tile) {
   const idx = G.hands[seat].indexOf(tile);
   if (idx < 0) return false;
   G.hands[seat].splice(idx, 1);
-  // リーチ宣言直後の打牌は 横向きマーク
+  // リーチ宣言直後の打牌は 横向きマーク + このタイミングで「リーチ!」発声 (実際の麻雀と同じ)
   if (G.justRiichiDeclared === seat) {
     tile.isRiichiDeclared = true;
     G.justRiichiDeclared = null;
+    playSE('riichi');
+    announce('riichi');
   }
   G.rivers[seat].push(tile);
   G.lastDiscard = tile;
@@ -1429,8 +1431,6 @@ function cpuPlay(seat) {
       G.scores[seat] -= 1000;
       G.kyotaku += 1000;
       G.justRiichiDeclared = seat;  // 宣言ターン = この打牌が リーチ宣言牌 (横向き)
-      playSE('riichi');
-      announce('riichi');
       toast(`${SEAT_LABEL_BASE[seat]} リーチ! (-1000点)`);
       // ※ 宣言ターンは テンパイ維持できる牌のみ捨てる (cpuDiscard 側で制限)
     }
@@ -2306,8 +2306,7 @@ if (document.getElementById('table')) {
       G.riichiTurnsLeft.bottom = 4;  // 一発: 自分含めて 4ターン以内
       G.scores.bottom -= 1000;
       G.kyotaku += 1000;
-      G.justRiichiDeclared = 'bottom';  // 次の打牌が リーチ宣言牌 (横向き)
-      announce('riichi');
+      G.justRiichiDeclared = 'bottom';  // 次の打牌が リーチ宣言牌 (横向き)、 発声は打牌時 (discardTile)
       // 先頭の候補牌を自動選択 → あがり牌ガイドが即表示される (雀魂式)
       const dispOrder = sortHand(G.hands.bottom.filter((_, i) => i !== G.justDrawn));
       if (G.justDrawn != null && G.hands.bottom[G.justDrawn]) dispOrder.push(G.hands.bottom[G.justDrawn]);
