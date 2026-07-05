@@ -901,6 +901,7 @@ function renderAll() {
   renderSeats();
   ALL_SEATS.forEach(s => { renderHand(s); renderRiver(s); });
   renderWalls();
+  renderRiichiGuide();
   updateActionButtons();
   updateHint();
 }
@@ -976,6 +977,44 @@ function visibleCountOf(id) {
 }
 function waitsLabel(waits) {
   return waits.map(id => `${TILE_NAMES[id]}(残${Math.max(0, 4 - visibleCountOf(id))})`).join('・');
+}
+
+// ─── リーチ中の待ち牌ガイド (雀魂式: 牌画像+残り枚数を 手牌の上に常時表示) ──
+function renderRiichiGuide() {
+  const el = document.getElementById('riichi-guide');
+  if (!el) return;
+  // 表示条件: リーチ成立後 (宣言牌打牌済) のみ。 宣言中は 選択プレビューに委ねる
+  if (!G.isRiichi.bottom || G.justRiichiDeclared === 'bottom' || G.roundOver) {
+    el.hidden = true;
+    return;
+  }
+  // 14枚時 (ツモ直後の自動処理中) は ツモ牌を除いた 13枚で待ちを計算
+  const base = (G.hands.bottom.length === 14 && G.justDrawn != null)
+    ? G.hands.bottom.filter((_, i) => i !== G.justDrawn)
+    : G.hands.bottom;
+  if (base.length !== 13) { el.hidden = true; return; }
+  const waits = waitingIds(base);
+  if (waits.length === 0) { el.hidden = true; return; }
+  el.innerHTML = '';
+  const lab = document.createElement('span');
+  lab.className = 'riichi-guide__label';
+  lab.textContent = '🔴リーチ中 — あがり牌:';
+  el.appendChild(lab);
+  waits.forEach(id => {
+    el.appendChild(createTileEl({ id, copy: 0, isRed: false }, { mini: true }));
+    const c = document.createElement('span');
+    c.className = 'riichi-guide__count';
+    c.textContent = `残${Math.max(0, 4 - visibleCountOf(id))}`;
+    el.appendChild(c);
+  });
+  const furiten = G.rivers.bottom.some(t => waits.includes(t.id)) || G.passFuriten || G.tempFuriten;
+  if (furiten) {
+    const f = document.createElement('span');
+    f.className = 'riichi-guide__furiten';
+    f.textContent = '⚠️フリテン(ロン不可)';
+    el.appendChild(f);
+  }
+  el.hidden = false;
 }
 
 // ─── アクションボタン ─────────────────────────

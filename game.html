@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="theme-color" content="#0d3b1f">
-  <link rel="stylesheet" href="style.css?v=0.7.13">
+  <link rel="stylesheet" href="style.css?v=0.7.14">
   <title>対戦中 — おもろい三麻</title>
 </head>
 <body class="game-body">
@@ -62,6 +62,8 @@
         <div class="seat__wall seat__wall--bottom" id="wall-bottom"></div>
         <div class="seat__label" id="label-bottom">あなた</div>
         <div class="seat__hand seat__hand--mine seat__hand--bottom" id="hand-bottom"></div>
+        <!-- リーチ中の待ち牌ガイド (column-reverse なので DOM末尾 = 手牌の上に表示) -->
+        <div class="riichi-guide" id="riichi-guide" hidden></div>
       </div>
     </div>
 
@@ -130,6 +132,6 @@
     </div>
   </div>
 
-  <script src="script.js?v=0.7.13"></script>
+  <script src="script.js?v=0.7.14"></script>
 </body>
 </html>
