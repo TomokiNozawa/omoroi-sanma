@@ -281,7 +281,7 @@ const NetGame = (() => {
       }
       // ツモった14枚目を全クライアントに見せてから捨てる (河に直行させない)
       renderAll();
-      setTimeout(() => cpuDiscard(seat, true), 1100);
+      setTimeout(() => cpuDiscard(seat, true), 900);
       return;
     }
     // 通常: 公開して 本人の操作待ち (タイムアウトで CPU 代打ち)
@@ -332,7 +332,7 @@ const NetGame = (() => {
     renderAll();
     if (G.pendingRon || G.roundOver || S.pendingOffer) return;
     G.busy = false;
-    setTimeout(() => { nextTurn(); startTurn(); }, 200);
+    setTimeout(() => { nextTurn(); startTurn(); }, 120);
   }
   function hostApplyRiichi(seat) {
     if (G.roundOver || G.turn !== seat || G.hands[seat].length !== 14) return;
@@ -403,7 +403,7 @@ const NetGame = (() => {
     if (G.roundOver) return;
     G.busy = false;
     renderAll();
-    setTimeout(() => { nextTurn(); startTurn(); }, 200);
+    setTimeout(() => { nextTurn(); startTurn(); }, 120);
   }
 
   // ─── ホスト: リモート席へのロンオファー (discardTile から) ──
