@@ -343,6 +343,7 @@ const NetGame = (() => {
     G.scores[seat] -= 1000;
     G.kyotaku += 1000;
     G.justRiichiDeclared = seat;
+    G.doubleRiichi[seat] = (G.rivers[seat].length === 0);  // 1巡目リーチ = ダブルリーチ
     // 発声/カットインは宣言牌の打牌時 (discardTile) に一本化
     toast(`${seatDispName(seat)} リーチ! (-1000点)`);
     renderAll();
@@ -366,7 +367,7 @@ const NetGame = (() => {
     const ctx = {
       isTsumo: true, isRiichi: G.isRiichi[seat], isOya: G.oya === seat, seatWind: seatWindOf(seat),
       doraIndicator: G.doraIndicator, uraIndicator: G.uraIndicator, kitas: G.kitas[seat], round: G.round,
-      isIppatsu: G.riichiTurnsLeft[seat] > 0,
+      isDoubleRiichi: G.doubleRiichi[seat], isHaitei: G.drawTiles.length === 0, isIppatsu: G.riichiTurnsLeft[seat] > 0,
       winTile: drawnIdx != null ? G.hands[seat][drawnIdx] : null,
     };
     const result = calcYaku(G.hands[seat], ctx);
@@ -385,7 +386,7 @@ const NetGame = (() => {
     const ctx = {
       isTsumo: false, isRiichi: G.isRiichi[seat], isOya: G.oya === seat, seatWind: seatWindOf(seat),
       doraIndicator: G.doraIndicator, uraIndicator: G.uraIndicator, kitas: G.kitas[seat], round: G.round,
-      isIppatsu: G.riichiTurnsLeft[seat] > 0, winTile: tile, fromSeat,
+      isDoubleRiichi: G.doubleRiichi[seat], isHaitei: G.drawTiles.length === 0, isIppatsu: G.riichiTurnsLeft[seat] > 0, winTile: tile, fromSeat,
     };
     const result = calcYaku(test, ctx);
     if (result.error || (result.han === 0 && !result.isYakuman)) return resumeAfterOffer();

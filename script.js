@@ -453,6 +453,24 @@ function isIttsuu(decomps) {
   return false;
 }
 
+// 幺九牌 (1・9・字牌) — チャンタ系判定用
+const YAOCHU_IDS = new Set([0, 1, 2, 10, 11, 19, 20, 21, 22, 23, 24, 25, 26]);
+// チャンタ/ジュンチャン: 全面子+雀頭に幺九牌が絡む ('junchan'=字牌なし3翻 / 'chanta'=2翻 / null)
+function chantaType(decomps) {
+  const meldYaochu = (m) => m.type === 'kotsu'
+    ? YAOCHU_IDS.has(m.id)
+    : (tileNum(m.id) === 1 || tileNum(m.id) === 7);  // 順子は 123 or 789 のみ
+  let best = null;
+  for (const d of decomps) {
+    if (!YAOCHU_IDS.has(d.pair)) continue;
+    if (!d.melds.every(meldYaochu)) continue;
+    const hasHonor = isJihaiId(d.pair) || d.melds.some(m => m.type === 'kotsu' && isJihaiId(m.id));
+    if (!hasHonor) return 'junchan';
+    best = 'chanta';
+  }
+  return best;
+}
+
 // 七対子 (7種ペア)
 function isChiitoitsu(hand) {
   if (hand.length !== 14) return false;
@@ -624,10 +642,10 @@ function countDora(hand, doraIndicator) {
 
 // 役の表示順 (慣例順: 状況役 → 手役 → ドラ系)
 const YAKU_DISPLAY_ORDER = [
-  '立直', '一発', '門前清自摸和',
+  'ダブルリーチ', '立直', '一発', '門前清自摸和', '海底摸月', '河底撈魚',
   'ピンフ', 'タンヤオ', '一盃口',
   '白', '發', '中', '場風 東', '場風 南', '自風 東', '自風 南', '自風 西',
-  '七対子', '対々和', '三暗刻', '一気通貫', '二盃口', '混一色', '清一色',
+  '七対子', '対々和', '三暗刻', '一気通貫', '二盃口', 'チャンタ', 'ジュンチャン', '混老頭', '小三元', '混一色', '清一色',
   'ドラ', '赤ドラ', '裏ドラ', '北抜き',
 ];
 function yakuOrderIdx(name) {
@@ -683,10 +701,33 @@ function calcYaku(hand, context) {
   if (isHonitsu(hand)) { yakuList.push({ name: '混一色', han: 3 }); han += 3; }
   if (isChinitsu(hand)) { yakuList.push({ name: '清一色', han: 6 }); han += 6; }
 
-  // 立直・一発・門前清自摸
-  if (context.isRiichi) { yakuList.push({ name: '立直', han: 1 }); han += 1; }
+  // チャンタ系 (混老頭 > ジュンチャン > チャンタ の順で1つだけ)
+  const allYaochu = hand.every(t => YAOCHU_IDS.has(t.id));
+  if (allYaochu) {
+    yakuList.push({ name: '混老頭', han: 2 }); han += 2;  // 全帯幺九の上位互換 (字一色/清老頭は役満で処理済)
+  } else if (stdDecomps.length > 0) {
+    const ch = chantaType(stdDecomps);
+    if (ch === 'junchan') { yakuList.push({ name: 'ジュンチャン', han: 3 }); han += 3; }
+    else if (ch === 'chanta') { yakuList.push({ name: 'チャンタ', han: 2 }); han += 2; }
+  }
+  // 小三元 (三元牌2種刻子 + 1種雀頭、 役牌2翻とは別に +2翻)
+  const cAll = countTiles(hand);
+  const sangenKo = SAN_GEN_IDS.filter(id => (cAll[id] || 0) >= 3).length;
+  const sangenHead = SAN_GEN_IDS.some(id => (cAll[id] || 0) === 2);
+  if (sangenKo === 2 && sangenHead) { yakuList.push({ name: '小三元', han: 2 }); han += 2; }
+
+  // 立直 (1巡目宣言はダブルリーチ)・一発・門前清自摸
+  if (context.isRiichi) {
+    if (context.isDoubleRiichi) { yakuList.push({ name: 'ダブルリーチ', han: 2 }); han += 2; }
+    else { yakuList.push({ name: '立直', han: 1 }); han += 1; }
+  }
   if (context.isIppatsu) { yakuList.push({ name: '一発', han: 1 }); han += 1; }
   if (context.isTsumo) { yakuList.push({ name: '門前清自摸和', han: 1 }); han += 1; }
+  // 海底摸月 / 河底撈魚 (山0枚での ツモ / 最終打牌ロン)
+  if (context.isHaitei) {
+    if (context.isTsumo) { yakuList.push({ name: '海底摸月', han: 1 }); han += 1; }
+    else { yakuList.push({ name: '河底撈魚', han: 1 }); han += 1; }
+  }
 
   // ドラ計算 (表ドラ + 赤ドラ + 北ドラ)
   const doraCount = countDora(hand, context.doraIndicator);
@@ -1152,7 +1193,7 @@ function updateActionButtons() {
       const result = calcYaku(G.hands.bottom, {
         isTsumo: true, isRiichi: G.isRiichi.bottom, isOya: G.oya === 'bottom', seatWind: seatWindOf('bottom'),
         doraIndicator: G.doraIndicator, uraIndicator: G.uraIndicator, kitas: G.kitas.bottom, round: G.round,
-        isIppatsu: G.riichiTurnsLeft.bottom > 0, winTile: drawnTile,
+        isDoubleRiichi: G.doubleRiichi.bottom, isHaitei: G.drawTiles.length === 0, isIppatsu: G.riichiTurnsLeft.bottom > 0, winTile: drawnTile,
       });
       canTsumo = !result.error && (result.han > 0 || result.isYakuman);
     }
@@ -1305,7 +1346,7 @@ function checkRonForSeat(seat, fromSeat, tile) {
   const ctx = {
     isTsumo: false, isRiichi: G.isRiichi[seat], isOya: G.oya === seat, seatWind: seatWindOf(seat),
     doraIndicator: G.doraIndicator, uraIndicator: G.uraIndicator, kitas: G.kitas[seat], round: G.round,
-    isIppatsu: G.riichiTurnsLeft[seat] > 0,
+    isDoubleRiichi: G.doubleRiichi[seat], isHaitei: G.drawTiles.length === 0, isIppatsu: G.riichiTurnsLeft[seat] > 0,
     winTile: tile, fromSeat,
   };
   const result = calcYaku(test, ctx);
@@ -1481,7 +1522,7 @@ function handleRiichiAutoBottom() {
     const result = calcYaku(G.hands.bottom, {
       isTsumo: true, isRiichi: true, isOya: G.oya === 'bottom', seatWind: seatWindOf('bottom'),
       doraIndicator: G.doraIndicator, uraIndicator: G.uraIndicator, kitas: G.kitas.bottom, round: G.round,
-      isIppatsu: G.riichiTurnsLeft.bottom > 0, winTile: drawnTile,
+      isDoubleRiichi: G.doubleRiichi.bottom, isHaitei: G.drawTiles.length === 0, isIppatsu: G.riichiTurnsLeft.bottom > 0, winTile: drawnTile,
     });
     canTsumoNow = !result.error && (result.han > 0 || result.isYakuman);
   }
@@ -1527,6 +1568,7 @@ function cpuPlay(seat) {
       G.scores[seat] -= 1000;
       G.kyotaku += 1000;
       G.justRiichiDeclared = seat;  // 宣言ターン = この打牌が リーチ宣言牌 (横向き)
+      G.doubleRiichi[seat] = (G.rivers[seat].length === 0);  // 1巡目リーチ = ダブルリーチ
       toast(`${seatLabel(seat)} リーチ! (-1000点)`);
       // ※ 宣言ターンは テンパイ維持できる牌のみ捨てる (cpuDiscard 側で制限)
     }
@@ -1551,7 +1593,7 @@ function cpuDiscard(seat, forceTsumoTile = false) {
     const ctx = {
       isTsumo: true, isRiichi: G.isRiichi[seat], isOya: G.oya === seat, seatWind: seatWindOf(seat),
       doraIndicator: G.doraIndicator, uraIndicator: G.uraIndicator, kitas: G.kitas[seat], round: G.round,
-      isIppatsu: G.riichiTurnsLeft[seat] > 0, winTile: drawn,
+      isDoubleRiichi: G.doubleRiichi[seat], isHaitei: G.drawTiles.length === 0, isIppatsu: G.riichiTurnsLeft[seat] > 0, winTile: drawn,
     };
     const result = calcYaku(G.hands[seat], ctx);
     if (!result.error && (result.han > 0 || result.isYakuman)) {
@@ -1988,6 +2030,7 @@ function startNewRound() {
   G.drawPosList = [];
   G.kingCells = [];
   G.isRiichi = { bottom: false, right: false, top: false, left: false };
+  G.doubleRiichi = { bottom: false, right: false, top: false, left: false };
   G.riichiTurnsLeft = { bottom: 0, right: 0, top: 0, left: 0 };
   G.pendingRon = null;
   G.justRiichiDeclared = null;
@@ -2462,7 +2505,7 @@ if (document.getElementById('table')) {
       const drawnTile = (G.justDrawn != null) ? G.hands.bottom[G.justDrawn] : null;
       const ctx = { isTsumo: true, isRiichi: G.isRiichi.bottom, isOya: G.oya === 'bottom', seatWind: seatWindOf('bottom'),
                     doraIndicator: G.doraIndicator, uraIndicator: G.uraIndicator, kitas: G.kitas.bottom, round: G.round,
-                    isIppatsu: G.riichiTurnsLeft.bottom > 0, winTile: drawnTile };
+                    isDoubleRiichi: G.doubleRiichi.bottom, isHaitei: G.drawTiles.length === 0, isIppatsu: G.riichiTurnsLeft.bottom > 0, winTile: drawnTile };
       const result = calcYaku(G.hands.bottom, ctx);
       if (result.error) { toast(result.error); return; }
       if (result.han === 0 && !result.isYakuman) { toast('役なし'); return; }
@@ -2476,7 +2519,7 @@ if (document.getElementById('table')) {
       const test = [...G.hands.bottom, tile];
       const ctx = { isTsumo: false, isRiichi: G.isRiichi.bottom, isOya: G.oya === 'bottom', seatWind: seatWindOf('bottom'),
                     doraIndicator: G.doraIndicator, uraIndicator: G.uraIndicator, kitas: G.kitas.bottom, round: G.round,
-                    isIppatsu: G.riichiTurnsLeft.bottom > 0, winTile: tile, fromSeat };
+                    isDoubleRiichi: G.doubleRiichi.bottom, isHaitei: G.drawTiles.length === 0, isIppatsu: G.riichiTurnsLeft.bottom > 0, winTile: tile, fromSeat };
       const result = calcYaku(test, ctx);
       if (result.error) { toast(result.error); return; }
       if (NETQ() && NETQ().isGuest()) { NETQ().guestAction('ron'); return; }  // 演出はホスト確定後にイベントで届く
@@ -2502,6 +2545,7 @@ if (document.getElementById('table')) {
       // 宣言直後 (宣言牌を捨てる前) は 取消として動作
       if (G.justRiichiDeclared === 'bottom') {
         G.isRiichi.bottom = false;
+        G.doubleRiichi.bottom = false;
         G.riichiTurnsLeft.bottom = 0;
         G.scores.bottom += 1000;
         G.kyotaku -= 1000;
@@ -2519,6 +2563,7 @@ if (document.getElementById('table')) {
       G.scores.bottom -= 1000;
       G.kyotaku += 1000;
       G.justRiichiDeclared = 'bottom';  // 次の打牌が リーチ宣言牌 (横向き)、 発声は打牌時 (discardTile)
+      G.doubleRiichi.bottom = (G.rivers.bottom.length === 0);  // 1巡目リーチ = ダブルリーチ
       // 先頭の候補牌を自動選択 → あがり牌ガイドが即表示される (雀魂式)
       const dispOrder = sortHand(G.hands.bottom.filter((_, i) => i !== G.justDrawn));
       if (G.justDrawn != null && G.hands.bottom[G.justDrawn]) dispOrder.push(G.hands.bottom[G.justDrawn]);
