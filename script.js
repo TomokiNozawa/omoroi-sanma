@@ -1426,7 +1426,7 @@ function startTurn() {
   } else {
     G.busy = true;
     renderAll();
-    setTimeout(() => cpuPlay(G.turn), 500);
+    setTimeout(() => cpuPlay(G.turn), 250);
   }
 }
 
@@ -1445,7 +1445,7 @@ function handleRiichiAutoBottom() {
       renderAll();
       G.busy = false;
       handleRiichiAutoBottom();
-    }, 600);
+    }, 400);
     return;
   }
   let canTsumoNow = false;
@@ -1470,8 +1470,8 @@ function handleRiichiAutoBottom() {
     renderAll();
     if (G.pendingRon || G.roundOver || netOfferPending()) return;  // ロン発生時は 進行停止
     G.busy = false;
-    setTimeout(() => { nextTurn(); startTurn(); }, 350);
-  }, 700);
+    setTimeout(() => { nextTurn(); startTurn(); }, 200);
+  }, 450);
 }
 
 function cpuPlay(seat) {
@@ -1486,7 +1486,7 @@ function cpuPlay(seat) {
       renderAll();
       drawn = G.hands[seat][G.hands[seat].length - 1];
     }
-    setTimeout(() => cpuDiscard(seat, true), 500);
+    setTimeout(() => cpuDiscard(seat, true), 400);
     return;
   }
   // 未リーチ → リーチ判定 (14牌、 1000点以上、 テンパイ、 70%確率)
@@ -1508,10 +1508,10 @@ function cpuPlay(seat) {
     setTimeout(() => {
       kitaNuki(seat);
       renderAll();
-      setTimeout(() => cpuDiscard(seat), 350);
-    }, 350);
+      setTimeout(() => cpuDiscard(seat), 200);
+    }, 200);
   } else {
-    setTimeout(() => cpuDiscard(seat), 500);
+    setTimeout(() => cpuDiscard(seat), 250);
   }
 }
 
@@ -1543,7 +1543,7 @@ function cpuDiscard(seat, forceTsumoTile = false) {
     renderAll();
     if (G.pendingRon || G.roundOver || netOfferPending()) return;
     G.busy = false;
-    setTimeout(() => { nextTurn(); startTurn(); }, 350);
+    setTimeout(() => { nextTurn(); startTurn(); }, 200);
     return;
   }
   // 通常打牌: リーチ宣言ターンは 「捨ててもテンパイが維持される牌」 に限定
@@ -1581,7 +1581,7 @@ function cpuDiscard(seat, forceTsumoTile = false) {
   // ロン保留 / リモートロンオファー / 局終了なら ターン進行を停止
   if (G.pendingRon || G.roundOver || netOfferPending()) return;
   G.busy = false;
-  setTimeout(() => { nextTurn(); startTurn(); }, 350);
+  setTimeout(() => { nextTurn(); startTurn(); }, 200);
 }
 
 function endRound(reason) {
@@ -2380,7 +2380,7 @@ if (document.getElementById('table')) {
       renderAll();
       // CPU/リモートがロンした場合 (busy/roundOver/オファー中) は ターン進行しない
       if (G.roundOver || G.busy || netOfferPending()) return;
-      setTimeout(() => { nextTurn(); startTurn(); }, 350);
+      setTimeout(() => { nextTurn(); startTurn(); }, 200);
     });
     document.getElementById('btn-kita')?.addEventListener('click', () => {
       if (G.turn !== 'bottom' || G.busy || G.roundOver) return;
@@ -2432,7 +2432,7 @@ if (document.getElementById('table')) {
       G.busy = false;
       toast('見逃しました (フリテン: しばらくロンできません)');
       renderAll();
-      setTimeout(() => { nextTurn(); startTurn(); }, 350);
+      setTimeout(() => { nextTurn(); startTurn(); }, 200);
     });
     document.getElementById('btn-riichi')?.addEventListener('click', () => {
       if (G.turn !== 'bottom' || G.busy || G.roundOver) return;

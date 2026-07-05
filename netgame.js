@@ -330,7 +330,7 @@ const NetGame = (() => {
     renderAll();
     if (G.pendingRon || G.roundOver || S.pendingOffer) return;
     G.busy = false;
-    setTimeout(() => { nextTurn(); startTurn(); }, 350);
+    setTimeout(() => { nextTurn(); startTurn(); }, 200);
   }
   function hostApplyRiichi(seat) {
     if (G.roundOver || G.turn !== seat || G.hands[seat].length !== 14) return;
@@ -401,7 +401,7 @@ const NetGame = (() => {
     if (G.roundOver) return;
     G.busy = false;
     renderAll();
-    setTimeout(() => { nextTurn(); startTurn(); }, 350);
+    setTimeout(() => { nextTurn(); startTurn(); }, 200);
   }
 
   // ─── ホスト: リモート席へのロンオファー (discardTile から) ──
