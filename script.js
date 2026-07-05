@@ -1319,7 +1319,7 @@ function discardTile(seat, tile) {
       } else {
         // CPU ロン: 自動宣言 (roundOver で 以降のターン進行を停止)
         const test = [...G.hands[checkSeat], tile];
-        playVoice('ロン!');
+        playVoice('ron');
         toast(`${seatLabel(checkSeat)} ロン! (${TILE_NAMES[tile.id]})`);
         G.busy = true;
         G.roundOver = true;
@@ -1344,7 +1344,7 @@ function kitaNuki(seat) {
   G.justDrawnAll[seat] = G.hands[seat].length - 1;
   if (seat === 'bottom') G.justDrawn = G.hands[seat].length - 1;
   playSE('kita');
-  playVoice('キタ');
+  playVoice('kita');
   toast(`${seatLabel(seat)} 北抜き (+1翻) / 抜き合計 ${G.kitas[seat]}`);
   return true;
 }
@@ -1454,7 +1454,7 @@ function cpuPlay(seat) {
       G.kyotaku += 1000;
       G.justRiichiDeclared = seat;  // 宣言ターン = この打牌が リーチ宣言牌 (横向き)
       playSE('riichi');
-      playVoice('リーチ!');
+      playVoice('riichi');
       toast(`${seatLabel(seat)} リーチ! (-1000点)`);
       // ※ 宣言ターンは テンパイ維持できる牌のみ捨てる (cpuDiscard 側で制限)
     }
@@ -1483,7 +1483,7 @@ function cpuDiscard(seat, forceTsumoTile = false) {
     };
     const result = calcYaku(G.hands[seat], ctx);
     if (!result.error && (result.han > 0 || result.isYakuman)) {
-      playVoice('ツモ!');
+      playVoice('tsumo');
       toast(`${seatLabel(seat)} ツモ!`);
       G.roundOver = true;
       showWinModal(seat, G.hands[seat], ctx, result);
@@ -2061,9 +2061,48 @@ if (typeof window !== 'undefined' && window.speechSynthesis) {
   window.speechSynthesis.onvoiceschanged = _pickJpVoice;
   _pickJpVoice();
 }
-function playVoice(text) {
+// ボイス種別 → フォールバック読み上げテキスト。
+// assets/voice/{kind}.mp3 (または .wav) が存在すれば **ファイルを優先再生**
+// (= 初音ミク等の録音ボイスをここに置くだけで差し替わる)。 無ければ内蔵音声合成。
+const VOICE_DEFS = {
+  riichi: 'リーチ!',
+  ron: 'ロン!',
+  tsumo: 'ツモ!',
+  kita: 'ペイ',    // 北は麻雀読みで「ペイ」
+  on: 'オン',
+};
+const _voiceAudio = {};  // kind → HTMLAudioElement (ロード成功) | null (ファイル無し確定)
+function _loadVoiceFile(kind) {
+  if (kind in _voiceAudio) return;
+  if (typeof Audio === 'undefined') { _voiceAudio[kind] = null; return; }
+  _voiceAudio[kind] = null;  // 判定完了まで null (フォールバック使用)
+  const tryLoad = (exts) => {
+    if (exts.length === 0) return;
+    try {
+      const a = new Audio(`assets/voice/${kind}.${exts[0]}`);
+      a.preload = 'auto';
+      a.addEventListener('canplaythrough', () => { _voiceAudio[kind] = a; }, { once: true });
+      a.addEventListener('error', () => tryLoad(exts.slice(1)), { once: true });
+    } catch (e) { /* Audio 非対応環境 */ }
+  };
+  tryLoad(['mp3', 'wav']);
+}
+if (typeof window !== 'undefined' && typeof Audio !== 'undefined') {
+  Object.keys(VOICE_DEFS).forEach(_loadVoiceFile);  // 起動時にプリロード判定
+}
+function playVoice(kind) {
   if (seMuted) return;
+  const text = VOICE_DEFS[kind];
+  if (!text) return;
   try {
+    // ① 録音ボイスファイルがあれば優先 (初音ミク差し替え口)
+    const a = _voiceAudio[kind];
+    if (a) {
+      a.currentTime = 0;
+      a.play().catch(() => {});
+      return;
+    }
+    // ② フォールバック: 端末内蔵の日本語音声合成
     if (typeof window === 'undefined' || !window.speechSynthesis) return;
     if (!_jpVoice) _pickJpVoice();
     const u = new SpeechSynthesisUtterance(text);
@@ -2186,7 +2225,7 @@ if (document.getElementById('table')) {
         seBtn.textContent = seMuted ? '🔇' : '🔊';
         toast(seMuted ? '効果音・ボイス OFF' : '効果音・ボイス ON');
         if (seMuted) { try { window.speechSynthesis?.cancel(); } catch (e) {} }
-        else playVoice('オン');
+        else playVoice('on');
       });
     }
     document.getElementById('guide-next')?.addEventListener('click', () => {
@@ -2237,8 +2276,8 @@ if (document.getElementById('table')) {
       const result = calcYaku(G.hands.bottom, ctx);
       if (result.error) { toast(result.error); return; }
       if (result.han === 0 && !result.isYakuman) { toast('役なし'); return; }
-      if (NETQ() && NETQ().isGuest()) { playVoice('ツモ!'); NETQ().guestAction('tsumo'); return; }
-      playVoice('ツモ!');
+      if (NETQ() && NETQ().isGuest()) { playVoice('tsumo'); NETQ().guestAction('tsumo'); return; }
+      playVoice('tsumo');
       showWinModal('bottom', G.hands.bottom, ctx, result);
     });
     document.getElementById('btn-ron')?.addEventListener('click', () => {
@@ -2250,10 +2289,10 @@ if (document.getElementById('table')) {
                     isIppatsu: G.riichiTurnsLeft.bottom > 0, winTile: tile, fromSeat };
       const result = calcYaku(test, ctx);
       if (result.error) { toast(result.error); return; }
-      if (NETQ() && NETQ().isGuest()) { playVoice('ロン!'); NETQ().guestAction('ron'); return; }
+      if (NETQ() && NETQ().isGuest()) { playVoice('ron'); NETQ().guestAction('ron'); return; }
       G.pendingRon = null;
       G.busy = false;
-      playVoice('ロン!');
+      playVoice('ron');
       showWinModal('bottom', test, ctx, result);
     });
     document.getElementById('btn-pass')?.addEventListener('click', () => {
@@ -2284,13 +2323,13 @@ if (document.getElementById('table')) {
       }
       if (G.isRiichi.bottom || G.scores.bottom < 1000) return;
       if (!canDeclareRiichi(G.hands.bottom)) return;
-      if (NETQ() && NETQ().isGuest()) { playVoice('リーチ!'); NETQ().guestAction('riichi'); return; }
+      if (NETQ() && NETQ().isGuest()) { playVoice('riichi'); NETQ().guestAction('riichi'); return; }
       G.isRiichi.bottom = true;
       G.riichiTurnsLeft.bottom = 4;  // 一発: 自分含めて 4ターン以内
       G.scores.bottom -= 1000;
       G.kyotaku += 1000;
       G.justRiichiDeclared = 'bottom';  // 次の打牌が リーチ宣言牌 (横向き)
-      playVoice('リーチ!');
+      playVoice('riichi');
       // 先頭の候補牌を自動選択 → あがり牌ガイドが即表示される (雀魂式)
       const dispOrder = sortHand(G.hands.bottom.filter((_, i) => i !== G.justDrawn));
       if (G.justDrawn != null && G.hands.bottom[G.justDrawn]) dispOrder.push(G.hands.bottom[G.justDrawn]);

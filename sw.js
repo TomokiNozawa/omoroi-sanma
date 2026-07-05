@@ -28,6 +28,8 @@ const PRECACHE = [
   `netgame.js?v=${SW_VERSION}`,
   'manifest.json',
   ...TILE_FILES.map(f => 'assets/' + encodeURIComponent(f)),
+  // ボイスファイル (未配置なら 404 → allSettled で skip、 配置後に自動キャッシュ)
+  ...['riichi', 'ron', 'tsumo', 'kita'].flatMap(k => [`assets/voice/${k}.mp3`, `assets/voice/${k}.wav`]),
 ];
 
 self.addEventListener('install', (event) => {
