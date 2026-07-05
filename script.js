@@ -1866,6 +1866,9 @@ function startNewRound() {
   G.busy = false;
   G.startSeat = null;
   G.diceTotal = 0;
+  G.diceD1 = 0;
+  G.diceD2 = 0;
+  G.ceremonyActive = true;  // net: ゲストへ「儀式中」を公開 (closeDiceCeremony で解除)
   G.cutPosInStart = 0;
   G.kingTiles = [];
   G.drawTiles = [];
@@ -1898,7 +1901,10 @@ function startNewRound() {
 const DICE_FACES = ['⚀', '⚁', '⚂', '⚃', '⚄', '⚅'];
 const SEAT_NAME_FOR_DICE = { bottom: 'あなた (自家)', right: '下家', top: '対面', left: '上家' };
 
-async function showDiceCeremony() {
+async function showDiceCeremony(preset) {
+  // preset = {guest:true, d1, d2}: net対戦ゲスト用 — ホストが振ったサイコロ値で同じ演出を再生
+  // (壁/王牌/起点データは ingestPub 済みの G を使い、 applyDice は実行しない)
+  const isGuestView = !!(preset && preset.guest);
   const overlay = document.getElementById('dice-overlay');
   const d1El = document.getElementById('dice-1');
   const d2El = document.getElementById('dice-2');
@@ -1929,35 +1935,43 @@ async function showDiceCeremony() {
   await sleep(1200);
   clearInterval(rollInterval);
 
-  const d1 = Math.floor(Math.random() * 6) + 1;
-  const d2 = Math.floor(Math.random() * 6) + 1;
+  const d1 = isGuestView ? preset.d1 : Math.floor(Math.random() * 6) + 1;
+  const d2 = isGuestView ? preset.d2 : Math.floor(Math.random() * 6) + 1;
   const total = d1 + d2;
   d1El.textContent = DICE_FACES[d1 - 1];
   d2El.textContent = DICE_FACES[d2 - 1];
   d1El.classList.remove('dice--rolling');
   d2El.classList.remove('dice--rolling');
   totalEl.textContent = total;
-  G.diceTotal = total;
 
-  // サイコロ結果を 山に適用 (親 G.oya から 反時計回りに数える)
-  const r = applyDice(G.walls, total, G.oya);
-  G.startSeat = r.startSeat;
-  G.cutPosInStart = r.cutPosInStart;  // = サイコロ目X (= カット位置 = 右端からX幢目)
-  G.kingTiles = r.kingTiles;
-  G.drawTiles = r.drawTiles;
-  G.doraSeat = r.doraSeat;
-  G.doraDouIdx = r.doraDouIdx;
-  G.drawPosList = r.drawPosList;
-  G.kingCells = r.kingCells;
-  G.doraIndicator = r.doraIndicator;
+  if (!isGuestView) {
+    G.diceTotal = total;
+    G.diceD1 = d1;
+    G.diceD2 = d2;
+
+    // サイコロ結果を 山に適用 (親 G.oya から 反時計回りに数える)
+    const r = applyDice(G.walls, total, G.oya);
+    G.startSeat = r.startSeat;
+    G.cutPosInStart = r.cutPosInStart;  // = サイコロ目X (= カット位置 = 右端からX幢目)
+    G.kingTiles = r.kingTiles;
+    G.drawTiles = r.drawTiles;
+    G.doraSeat = r.doraSeat;
+    G.doraDouIdx = r.doraDouIdx;
+    G.drawPosList = r.drawPosList;
+    G.kingCells = r.kingCells;
+    G.doraIndicator = r.doraIndicator;
+    // net-host: サイコロ値+壁データを即公開 → ゲストも同じ儀式を再生
+    if (NETQ() && NETQ().isHost()) NETQ().onCeremony();
+  }
+  const startSeat = G.startSeat;  // guest は ingestPub 済みの値 (自分視点に回転済)
 
   // 起点家の山 (カウント・王牌・ドラ) がポップアップに隠れないよう、
   // カウントが画面上側で進む 対面/下家 起点のときは ポップアップを下側へ退避
-  overlay.classList.toggle('dice-overlay--low', r.startSeat === 'top' || r.startSeat === 'right');
+  overlay.classList.toggle('dice-overlay--low', startSeat === 'top' || startSeat === 'right');
 
   await sleep(400);
   titleEl.textContent = `合計 ${total}!`;
-  explainEl.textContent = `親 (${SEAT_NAME_FOR_DICE[G.oya]}) から反時計回りに ${total} 番目 = 「${SEAT_NAME_FOR_DICE[r.startSeat]}」 の山から決めます`;
+  explainEl.textContent = `親 (${SEAT_NAME_FOR_DICE[G.oya]}) から反時計回りに ${total} 番目 = 「${SEAT_NAME_FOR_DICE[startSeat]}」 の山から決めます`;
   if (mnemonicEl) mnemonicEl.hidden = false;
   await sleep(2200);
 
@@ -1968,7 +1982,7 @@ async function showDiceCeremony() {
   // カウントアニメ: 起点家の山の 「右端から N幢目」 を 順に ハイライト (視覚的に)
   // DOM 順 (= append 順) は dou0_top, dou0_bot, ..., dou12_top, dou12_bot, dou13_top
   // 視覚的に「右端 = dou0」 なので 1幢目 = dou0、 2幢目 = dou1、 ... 同一幢は 上段+下段 両方ハイライト
-  const wallEl = document.getElementById(`wall-${r.startSeat}`);
+  const wallEl = document.getElementById(`wall-${startSeat}`);
   const tilesByDou = {};  // douIdx → [topEl, botEl]
   if (wallEl) {
     Array.from(wallEl.querySelectorAll('.wall-tile')).forEach(el => {
@@ -1999,11 +2013,26 @@ async function showDiceCeremony() {
   titleEl.textContent = '✨ 王牌+ドラ表示 決定!';
   explainEl.textContent = `紫の 7幢 (14牌) が王牌。 その中央で 表向きになっている牌が ドラ表示です。`;
   counterEl.hidden = true;
-  okBtn.hidden = false;
+  if (isGuestView) {
+    // ゲストは配牌の権限なし: ホストの配牌 (phase=play の pub) を待って自動で閉じる
+    explainEl.textContent += ' まもなくホストの合図で配牌が始まります…';
+    G._guestCeremonyAnimDone = true;
+    if (G._guestCeremonyCloseWanted) closeGuestCeremony();
+  } else {
+    okBtn.hidden = false;
+  }
+}
+
+function closeGuestCeremony() {
+  const ov = document.getElementById('dice-overlay');
+  if (ov) ov.hidden = true;
+  G._guestCeremonyAnimDone = false;
+  G._guestCeremonyCloseWanted = false;
 }
 
 function closeDiceCeremony() {
   document.getElementById('dice-overlay').hidden = true;
+  G.ceremonyActive = false;  // net: 以降の pub は phase=play (ゲスト儀式の閉幕合図)
   // ガード: サイコロ未適用 (山0) や 二重呼び出し (配牌済で山55枚等) では配牌しない
   if (G.drawTiles.length !== 94) return;
   // 配牌実施
@@ -2122,9 +2151,11 @@ function showCallout(kind) {
   } catch (e) { /* 演出失敗でもゲームは止めない */ }
 }
 // 宣言 = カットイン + ボイス (SE は 各所で既存のまま)
+// net-host はイベントとして pub に載せ、 ゲスト側でも同じ演出が再生される
 function announce(kind) {
   showCallout(kind);
   playVoice(kind);
+  if (NETQ() && NETQ().isHost()) NETQ().recordEvent(kind);
 }
 
 function playVoice(kind) {
@@ -2313,7 +2344,7 @@ if (document.getElementById('table')) {
       const result = calcYaku(G.hands.bottom, ctx);
       if (result.error) { toast(result.error); return; }
       if (result.han === 0 && !result.isYakuman) { toast('役なし'); return; }
-      if (NETQ() && NETQ().isGuest()) { announce('tsumo'); NETQ().guestAction('tsumo'); return; }
+      if (NETQ() && NETQ().isGuest()) { NETQ().guestAction('tsumo'); return; }  // 演出はホスト確定後にイベントで届く
       announce('tsumo');
       showWinModal('bottom', G.hands.bottom, ctx, result);
     });
@@ -2326,7 +2357,7 @@ if (document.getElementById('table')) {
                     isIppatsu: G.riichiTurnsLeft.bottom > 0, winTile: tile, fromSeat };
       const result = calcYaku(test, ctx);
       if (result.error) { toast(result.error); return; }
-      if (NETQ() && NETQ().isGuest()) { announce('ron'); NETQ().guestAction('ron'); return; }
+      if (NETQ() && NETQ().isGuest()) { NETQ().guestAction('ron'); return; }  // 演出はホスト確定後にイベントで届く
       G.pendingRon = null;
       G.busy = false;
       announce('ron');
@@ -2360,7 +2391,7 @@ if (document.getElementById('table')) {
       }
       if (G.isRiichi.bottom || G.scores.bottom < 1000) return;
       if (!canDeclareRiichi(G.hands.bottom)) return;
-      if (NETQ() && NETQ().isGuest()) { announce('riichi'); NETQ().guestAction('riichi'); return; }
+      if (NETQ() && NETQ().isGuest()) { NETQ().guestAction('riichi'); return; }  // 発声は宣言牌打牌時にイベントで届く
       G.isRiichi.bottom = true;
       G.riichiTurnsLeft.bottom = 4;  // 一発: 自分含めて 4ターン以内
       G.scores.bottom -= 1000;

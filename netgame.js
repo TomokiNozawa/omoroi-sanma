@@ -30,6 +30,11 @@ const NetGame = (() => {
     endInfoShown: false,
     lastPubTime: 0,
     busySent: false,
+    ceremonySeq: 0,      // host: 儀式ごとに +1 (ゲストの再生トリガー)
+    seenCeremony: 0,     // guest: 再生済み儀式 seq
+    evSeq: 0,            // host: 演出イベント通番
+    events: [],          // host: 直近イベント [{q, k}] (pub に載せる)
+    lastEvSeq: -1,       // guest: 再生済みイベント seq (-1 = 初回pub未受信)
   };
 
   const rotSeat = (seat, k) => (seat && ALL_SEATS.includes(seat))
@@ -196,6 +201,10 @@ const NetGame = (() => {
       startSeat: G.startSeat, cutPosInStart: G.cutPosInStart,
       lastDiscardSeat: lastDiscardSeat(),
       seatNames: S.seatNames,
+      phase: G.ceremonyActive ? 'dice' : 'play',
+      dice: (G.diceD1 ? [G.diceD1, G.diceD2] : null),
+      ceremonySeq: S.ceremonySeq,
+      events: S.events,
       ronOffer: S.pendingOffer
         ? { seat: S.pendingOffer.seat, fromSeat: S.pendingOffer.fromSeat, tile: S.pendingOffer.tile }
         : null,
@@ -236,6 +245,20 @@ const NetGame = (() => {
     if (!isHost()) return;
     if (S.pubTimer) clearTimeout(S.pubTimer);
     S.pubTimer = setTimeout(publish, 60);
+  }
+  // 儀式開始 (showDiceCeremony がサイコロ適用直後に呼ぶ): 即公開してゲストにも再生させる
+  function onCeremony() {
+    if (!isHost()) return;
+    S.ceremonySeq++;
+    publish();
+  }
+  // 宣言演出 (announce がホスト側で呼ぶ): イベントとして pub に載せる
+  function recordEvent(kind) {
+    if (!isHost()) return;
+    S.evSeq++;
+    S.events.push({ q: S.evSeq, k: kind });
+    if (S.events.length > 6) S.events.shift();
+    publish();
   }
 
   // ─── ホスト: リモート番の進行 ──────────────────
@@ -310,8 +333,7 @@ const NetGame = (() => {
     G.scores[seat] -= 1000;
     G.kyotaku += 1000;
     G.justRiichiDeclared = seat;
-    playSE('riichi');
-    announce('riichi');
+    // 発声/カットインは宣言牌の打牌時 (discardTile) に一本化
     toast(`${seatDispName(seat)} リーチ! (-1000点)`);
     renderAll();
     armTurnTimeout(seat);  // 宣言牌の打牌待ち
@@ -465,6 +487,30 @@ const NetGame = (() => {
     } else {
       G.pendingRon = null;
     }
+    // 演出イベント再生 (リーチ/ロン/ツモ/北抜き のカットイン+ボイス)
+    // 初回受信 (途中参加/再接続) では過去イベントを再生しない
+    const evs = pub.events || [];
+    if (S.lastEvSeq < 0) {
+      S.lastEvSeq = evs.reduce((m, e) => Math.max(m, e.q), 0);
+    } else {
+      for (const e of evs) {
+        if (e.q > S.lastEvSeq) { S.lastEvSeq = e.q; announce(e.k); }
+      }
+    }
+    // サイコロ儀式: ホストと同じサイコロ値・壁で再生 (山分けを全員で確認)
+    if (pub.phase === 'dice' && pub.dice && pub.ceremonySeq > S.seenCeremony) {
+      S.seenCeremony = pub.ceremonySeq;
+      G._guestCeremonyAnimDone = false;
+      G._guestCeremonyCloseWanted = false;
+      setTimeout(() => showDiceCeremony({ guest: true, d1: pub.dice[0], d2: pub.dice[1] }), 200);
+    } else if (pub.phase !== 'dice') {
+      // ホストが配牌 → ゲスト儀式はアニメ完了を待って閉じる
+      const dov = document.getElementById('dice-overlay');
+      if (dov && !dov.hidden) {
+        if (G._guestCeremonyAnimDone) closeGuestCeremony();
+        else G._guestCeremonyCloseWanted = true;
+      }
+    }
     // 局終了表示
     G.roundOver = !!pub.endInfo;
     if (pub.endInfo && !S.endInfoShown) {
@@ -514,6 +560,7 @@ const NetGame = (() => {
 
   return {
     boot, onRender, onWinModal, onEndRound, onGameEnd, onNewRound,
+    onCeremony, recordEvent,
     offerRon, remotePlay, isRemoteSeat, hasOffer,
     isGuest, isHost,
     guestAction, sendDiscard,
