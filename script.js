@@ -453,6 +453,16 @@ function isIttsuu(decomps) {
   return false;
 }
 
+// 三色同刻: 同じ数字の刻子を 萬筒索3色で (三麻は萬子1・9のみなので 111 / 999 限定)
+function isSanshokuDoukou(decomps) {
+  for (const d of decomps) {
+    const kotsuIds = new Set(d.melds.filter(m => m.type === 'kotsu').map(m => m.id));
+    if (kotsuIds.has(0) && kotsuIds.has(2) && kotsuIds.has(11)) return true;   // 111
+    if (kotsuIds.has(1) && kotsuIds.has(10) && kotsuIds.has(19)) return true;  // 999
+  }
+  return false;
+}
+
 // 幺九牌 (1・9・字牌) — チャンタ系判定用
 const YAOCHU_IDS = new Set([0, 1, 2, 10, 11, 19, 20, 21, 22, 23, 24, 25, 26]);
 // チャンタ/ジュンチャン: 全面子+雀頭に幺九牌が絡む ('junchan'=字牌なし3翻 / 'chanta'=2翻 / null)
@@ -583,22 +593,25 @@ function countYakuhai(hand, context) {
   return yakus;
 }
 
-// 役満系 (簡易): 四暗刻、 字一色、 緑一色、 清老頭、 大三元、 国士無双
+// 役満系: 四暗刻(単騎はダブル)、 字一色、 緑一色、 清老頭、 大三元、 国士無双、
+//        大四喜(ダブル)/小四喜、 九蓮宝燈、 天和/地和
 function checkYakuman(hand, context) {
   const ymList = [];
+  const counts = countTiles(hand);
   if (isKokushi(hand)) ymList.push({ name: '国士無双', han: 13 });
-  // 四暗刻 (4暗刻+雀頭、 ツモ限定で簡略)
-  if (context.isTsumo) {
-    const counts = countTiles(hand);
-    let ankoCount = 0, pair = 0;
-    let valid = true;
+  // 四暗刻: 対子+刻子のみの形。 単騎待ち (あがり牌=雀頭) は ロンでも成立 + ダブル役満。
+  //         単騎以外は ツモ限定 (ロンだと最後の刻子が明刻扱い)
+  {
+    let ankoCount = 0, pairId = null, valid = true;
     for (const id in counts) {
       if (counts[id] === 3) ankoCount++;
-      else if (counts[id] === 2) pair++;
+      else if (counts[id] === 2) pairId = Number(id);
       else { valid = false; break; }
     }
-    if (valid && ankoCount === 4 && pair === 1) {
-      ymList.push({ name: '四暗刻', han: 13 });
+    if (valid && ankoCount === 4 && pairId != null) {
+      const tanki = context.winTile && context.winTile.id === pairId;
+      if (tanki) ymList.push({ name: '四暗刻単騎', han: 26 });
+      else if (context.isTsumo) ymList.push({ name: '四暗刻', han: 13 });
     }
   }
   // 字一色 (全部字牌)
@@ -610,9 +623,31 @@ function checkYakuman(hand, context) {
   const RYUUIISO_IDS = new Set([12, 13, 14, 16, 18, 25]);
   if (hand.every(t => RYUUIISO_IDS.has(t.id))) ymList.push({ name: '緑一色', han: 13 });
   // 大三元 (白發中 全部刻子)
-  const counts = countTiles(hand);
   if ((counts[24] || 0) >= 3 && (counts[25] || 0) >= 3 && (counts[26] || 0) >= 3) {
     ymList.push({ name: '大三元', han: 13 });
+  }
+  // 四喜和 (東南西北): 大四喜 = 4種刻子 (ダブル) / 小四喜 = 3種刻子+1種雀頭
+  {
+    const windKo = [20, 21, 22, 23].filter(id => (counts[id] || 0) >= 3).length;
+    const windPair = [20, 21, 22, 23].filter(id => (counts[id] || 0) === 2).length;
+    if (windKo === 4) ymList.push({ name: '大四喜', han: 26 });
+    else if (windKo === 3 && windPair === 1) ymList.push({ name: '小四喜', han: 13 });
+  }
+  // 九蓮宝燈 (清一色 1112345678999+1枚、 三麻は筒子/索子のみ)
+  for (const base of [2, 11]) {
+    if (!hand.every(t => t.id >= base && t.id <= base + 8)) continue;
+    let extra = 0, ok = true;
+    for (let n = 0; n < 9; n++) {
+      const need = (n === 0 || n === 8) ? 3 : 1;
+      const c = counts[base + n] || 0;
+      if (c < need) { ok = false; break; }
+      extra += c - need;
+    }
+    if (ok && extra === 1) { ymList.push({ name: '九蓮宝燈', han: 13 }); break; }
+  }
+  // 天和 (親の配牌ツモ) / 地和 (子の第一ツモ、 北抜き・打牌なし)
+  if (context.firstDraw && context.isTsumo) {
+    ymList.push(context.isOya ? { name: '天和', han: 13 } : { name: '地和', han: 13 });
   }
   return ymList;
 }
@@ -645,7 +680,7 @@ const YAKU_DISPLAY_ORDER = [
   'ダブルリーチ', '立直', '一発', '門前清自摸和', '海底摸月', '河底撈魚',
   'ピンフ', 'タンヤオ', '一盃口',
   '白', '發', '中', '場風 東', '場風 南', '自風 東', '自風 南', '自風 西',
-  '七対子', '対々和', '三暗刻', '一気通貫', '二盃口', 'チャンタ', 'ジュンチャン', '混老頭', '小三元', '混一色', '清一色',
+  '七対子', '対々和', '三暗刻', '三色同刻', '一気通貫', '二盃口', 'チャンタ', 'ジュンチャン', '混老頭', '小三元', '混一色', '清一色',
   'ドラ', '赤ドラ', '裏ドラ', '北抜き',
 ];
 function yakuOrderIdx(name) {
@@ -664,11 +699,11 @@ function calcYaku(hand, context) {
     return { yakuList: [], han: 0, isYakuman: false, error: 'あがり形ではありません' };
   }
 
-  // 役満チェック (優先)
+  // 役満チェック (優先、 ダブル役満は han26 で加算)
   const yms = checkYakuman(hand, context);
   if (yms.length > 0) {
     for (const ym of yms) yakuList.push(ym);
-    return { yakuList, han: 13 * yms.length, isYakuman: true };
+    return { yakuList, han: yms.reduce((n, y) => n + y.han, 0), isYakuman: true };
   }
 
   // 七対子チェック (二盃口形にも取れる場合は 高点法で 標準形を優先)
@@ -681,6 +716,7 @@ function calcYaku(hand, context) {
     // 標準形の役
     const decomps = stdDecomps;
     if (isToitoi(hand)) { yakuList.push({ name: '対々和', han: 2 }); han += 2; }
+    if (isSanshokuDoukou(decomps)) { yakuList.push({ name: '三色同刻', han: 2 }); han += 2; }
     const ankoCount = countAnkoCount(hand);
     if (ankoCount >= 3 && context.isTsumo) { yakuList.push({ name: '三暗刻', han: 2 }); han += 2; }
     // ピンフ (全順子 + 雀頭非役牌 + 両面待ち)
@@ -782,7 +818,7 @@ function tileSpanHtml(t, extra = '') {
 
 // ─── 翻数 → 名前 ─────────────────────────
 function hanToTier(han, isYakuman) {
-  if (isYakuman) return '役満';
+  if (isYakuman) return han >= 39 ? 'トリプル役満' : han >= 26 ? 'ダブル役満' : '役満';
   if (han >= 13) return '数え役満';
   if (han >= 11) return '三倍満';
   if (han >= 8) return '倍満';
@@ -1193,7 +1229,7 @@ function updateActionButtons() {
       const result = calcYaku(G.hands.bottom, {
         isTsumo: true, isRiichi: G.isRiichi.bottom, isOya: G.oya === 'bottom', seatWind: seatWindOf('bottom'),
         doraIndicator: G.doraIndicator, uraIndicator: G.uraIndicator, kitas: G.kitas.bottom, round: G.round,
-        isDoubleRiichi: G.doubleRiichi.bottom, isHaitei: G.drawTiles.length === 0, isIppatsu: G.riichiTurnsLeft.bottom > 0, winTile: drawnTile,
+        isDoubleRiichi: G.doubleRiichi.bottom, firstDraw: G.rivers.bottom.length === 0 && G.kitas.bottom === 0, isHaitei: G.drawTiles.length === 0, isIppatsu: G.riichiTurnsLeft.bottom > 0, winTile: drawnTile,
       });
       canTsumo = !result.error && (result.han > 0 || result.isYakuman);
     }
@@ -1346,7 +1382,7 @@ function checkRonForSeat(seat, fromSeat, tile) {
   const ctx = {
     isTsumo: false, isRiichi: G.isRiichi[seat], isOya: G.oya === seat, seatWind: seatWindOf(seat),
     doraIndicator: G.doraIndicator, uraIndicator: G.uraIndicator, kitas: G.kitas[seat], round: G.round,
-    isDoubleRiichi: G.doubleRiichi[seat], isHaitei: G.drawTiles.length === 0, isIppatsu: G.riichiTurnsLeft[seat] > 0,
+    isDoubleRiichi: G.doubleRiichi[seat], firstDraw: G.rivers[seat].length === 0 && G.kitas[seat] === 0, isHaitei: G.drawTiles.length === 0, isIppatsu: G.riichiTurnsLeft[seat] > 0,
     winTile: tile, fromSeat,
   };
   const result = calcYaku(test, ctx);
@@ -1522,7 +1558,7 @@ function handleRiichiAutoBottom() {
     const result = calcYaku(G.hands.bottom, {
       isTsumo: true, isRiichi: true, isOya: G.oya === 'bottom', seatWind: seatWindOf('bottom'),
       doraIndicator: G.doraIndicator, uraIndicator: G.uraIndicator, kitas: G.kitas.bottom, round: G.round,
-      isDoubleRiichi: G.doubleRiichi.bottom, isHaitei: G.drawTiles.length === 0, isIppatsu: G.riichiTurnsLeft.bottom > 0, winTile: drawnTile,
+      isDoubleRiichi: G.doubleRiichi.bottom, firstDraw: G.rivers.bottom.length === 0 && G.kitas.bottom === 0, isHaitei: G.drawTiles.length === 0, isIppatsu: G.riichiTurnsLeft.bottom > 0, winTile: drawnTile,
     });
     canTsumoNow = !result.error && (result.han > 0 || result.isYakuman);
   }
@@ -1593,7 +1629,7 @@ function cpuDiscard(seat, forceTsumoTile = false) {
     const ctx = {
       isTsumo: true, isRiichi: G.isRiichi[seat], isOya: G.oya === seat, seatWind: seatWindOf(seat),
       doraIndicator: G.doraIndicator, uraIndicator: G.uraIndicator, kitas: G.kitas[seat], round: G.round,
-      isDoubleRiichi: G.doubleRiichi[seat], isHaitei: G.drawTiles.length === 0, isIppatsu: G.riichiTurnsLeft[seat] > 0, winTile: drawn,
+      isDoubleRiichi: G.doubleRiichi[seat], firstDraw: G.rivers[seat].length === 0 && G.kitas[seat] === 0, isHaitei: G.drawTiles.length === 0, isIppatsu: G.riichiTurnsLeft[seat] > 0, winTile: drawn,
     };
     const result = calcYaku(G.hands[seat], ctx);
     if (!result.error && (result.han > 0 || result.isYakuman)) {
@@ -2505,7 +2541,7 @@ if (document.getElementById('table')) {
       const drawnTile = (G.justDrawn != null) ? G.hands.bottom[G.justDrawn] : null;
       const ctx = { isTsumo: true, isRiichi: G.isRiichi.bottom, isOya: G.oya === 'bottom', seatWind: seatWindOf('bottom'),
                     doraIndicator: G.doraIndicator, uraIndicator: G.uraIndicator, kitas: G.kitas.bottom, round: G.round,
-                    isDoubleRiichi: G.doubleRiichi.bottom, isHaitei: G.drawTiles.length === 0, isIppatsu: G.riichiTurnsLeft.bottom > 0, winTile: drawnTile };
+                    isDoubleRiichi: G.doubleRiichi.bottom, firstDraw: G.rivers.bottom.length === 0 && G.kitas.bottom === 0, isHaitei: G.drawTiles.length === 0, isIppatsu: G.riichiTurnsLeft.bottom > 0, winTile: drawnTile };
       const result = calcYaku(G.hands.bottom, ctx);
       if (result.error) { toast(result.error); return; }
       if (result.han === 0 && !result.isYakuman) { toast('役なし'); return; }
@@ -2519,7 +2555,7 @@ if (document.getElementById('table')) {
       const test = [...G.hands.bottom, tile];
       const ctx = { isTsumo: false, isRiichi: G.isRiichi.bottom, isOya: G.oya === 'bottom', seatWind: seatWindOf('bottom'),
                     doraIndicator: G.doraIndicator, uraIndicator: G.uraIndicator, kitas: G.kitas.bottom, round: G.round,
-                    isDoubleRiichi: G.doubleRiichi.bottom, isHaitei: G.drawTiles.length === 0, isIppatsu: G.riichiTurnsLeft.bottom > 0, winTile: tile, fromSeat };
+                    isDoubleRiichi: G.doubleRiichi.bottom, firstDraw: G.rivers.bottom.length === 0 && G.kitas.bottom === 0, isHaitei: G.drawTiles.length === 0, isIppatsu: G.riichiTurnsLeft.bottom > 0, winTile: tile, fromSeat };
       const result = calcYaku(test, ctx);
       if (result.error) { toast(result.error); return; }
       if (NETQ() && NETQ().isGuest()) { NETQ().guestAction('ron'); return; }  // 演出はホスト確定後にイベントで届く
