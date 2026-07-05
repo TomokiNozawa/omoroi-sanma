@@ -706,6 +706,27 @@ function calcYaku(hand, context) {
   return { yakuList, han, isYakuman: false };
 }
 
+// 点数移動アニメーション: 各席のラベル付近に ±点数バッジを浮かせる
+// deltas = {seat: 増減} (表示座席キー)。 net ゲストは pub のスコア差分から呼ばれる
+function showScoreBadges(deltas) {
+  try {
+    for (const s of ALL_SEATS) {
+      const d = deltas[s];
+      if (!d) continue;
+      const label = document.getElementById(`label-${s}`);
+      if (!label) continue;
+      const r = label.getBoundingClientRect();
+      const el = document.createElement('div');
+      el.className = 'score-badge ' + (d > 0 ? 'score-badge--plus' : 'score-badge--minus');
+      el.textContent = (d > 0 ? '+' : '') + d.toLocaleString();
+      el.style.left = `${r.left + r.width / 2}px`;
+      el.style.top = `${Math.max(24, r.top - 6)}px`;
+      document.body.appendChild(el);
+      setTimeout(() => el.remove(), 1900);
+    }
+  } catch (e) { /* 演出失敗でもゲームは止めない */ }
+}
+
 // 結果モーダル用の牌スパン (手牌を小さく描く共通ヘルパー)
 function tileSpanHtml(t, extra = '') {
   return `<span style="display:inline-block; width:26px; height:35px; border-radius:3px; background:url('assets/${encodeURIComponent(TILE_IMG[t.id])}') center/100% 100% no-repeat; ${extra}"></span>`;
@@ -1586,6 +1607,7 @@ function cpuDiscard(seat, forceTsumoTile = false) {
 
 function endRound(reason) {
   document.getElementById('end-title').textContent = reason;
+  const ryuDeltas = {};  // 点棒移動バッジ用 {seat: 増減}
   if (reason === '流局') {
     // テンパイ判定 (各プレイヤー、 13牌時のみ判定)
     const tenpaiSeats = [];
@@ -1607,8 +1629,8 @@ function endRound(reason) {
       const totalPay = 3000;
       const payPer = Math.floor(totalPay / notenSeats.length);
       const recvPer = Math.floor(totalPay / tenpaiSeats.length);
-      for (const s of notenSeats) G.scores[s] -= payPer;
-      for (const s of tenpaiSeats) G.scores[s] += recvPer;
+      for (const s of notenSeats) { G.scores[s] -= payPer; ryuDeltas[s] = -payPer; }
+      for (const s of tenpaiSeats) { G.scores[s] += recvPer; ryuDeltas[s] = recvPer; }
     }
     let txt = `山が尽きました。<br>`;
     txt += `点棒移動: ${notenSeats.length > 0 && tenpaiSeats.length > 0 ? '3000点 ノーテン→テンパイ' : 'なし'}<br>`;
@@ -1638,12 +1660,17 @@ function endRound(reason) {
   }
   G.roundOver = true;
   renderAll();  // 全員の手牌を表向き公開 (「盤面を見る」 用)
-  document.getElementById('end-overlay').hidden = false;
-  // net対戦ホスト: 流局結果をゲストへ配信
-  if (NETQ()) {
-    NETQ().onEndRound(document.getElementById('end-title').textContent,
-      document.getElementById('end-text').innerHTML);
-  }
+  // 点棒移動があれば バッジ演出 → 一拍おいて モーダル表示
+  const hasPay = Object.keys(ryuDeltas).length > 0;
+  if (hasPay) setTimeout(() => showScoreBadges(ryuDeltas), 300);
+  setTimeout(() => {
+    document.getElementById('end-overlay').hidden = false;
+    // net対戦ホスト: 流局結果をゲストへ配信
+    if (NETQ()) {
+      NETQ().onEndRound(document.getElementById('end-title').textContent,
+        document.getElementById('end-text').innerHTML);
+    }
+  }, hasPay ? 1600 : 400);
 }
 
 // ─── 勝利時の点数移動 (供託回収 + 本場加算込み) ─────
@@ -1759,14 +1786,18 @@ function showWinModal(seat, hand, context, result) {
   const fromLabel = context.isTsumo
     ? (isOya ? `親ツモ — 全員から ${(baseGain / Math.max(1, payerCount)).toLocaleString()}点ずつ` : 'ツモ — 親と子から')
     : `ロン — ${seatShareLabel(context.fromSeat) || ''} の支払い`;
+  // 初心者向け: 「基本点」 を大きく (点数表の値と一致 = 覚えられる)、 本場/供託は別枠で加算表示
   let bannerHtml = '<div style="background:rgba(255,235,59,0.15); border:1px solid rgba(255,235,59,0.5); border-radius:8px; padding:8px 10px; margin:6px 0; text-align:center;">';
-  bannerHtml += `<div style="font-size:26px; font-weight:bold; color:#ffeb3b; line-height:1.2;">+${gain.toLocaleString()}<span style="font-size:14px;">点</span></div>`;
-  bannerHtml += `<div style="font-size:10px; color:#cde;">${fromLabel}`;
+  bannerHtml += `<div style="font-size:26px; font-weight:bold; color:#ffeb3b; line-height:1.2;">${baseGain.toLocaleString()}<span style="font-size:14px;">点</span></div>`;
   const parts = [];
-  if (honbaAdd > 0) parts.push(`本場 +${honbaAdd.toLocaleString()}`);
-  if (prevKyotaku > 0) parts.push(`供託 +${prevKyotaku.toLocaleString()}`);
-  if (parts.length > 0) bannerHtml += ` (基本 ${baseGain.toLocaleString()} + ${parts.join(' + ')})`;
-  bannerHtml += '</div></div>';
+  if (honbaAdd > 0) parts.push(`本場 ${honbaAdd.toLocaleString()}`);
+  if (prevKyotaku > 0) parts.push(`供託 ${prevKyotaku.toLocaleString()}`);
+  if (parts.length > 0) {
+    bannerHtml += `<div style="font-size:14px; color:#ffd54f; margin-top:2px;">+ ( ${parts.join(' + ')} )</div>`;
+    bannerHtml += `<div style="font-size:12px; color:#cde; margin-top:2px;">= 合計 <b style="color:#ffeb3b;">+${gain.toLocaleString()}点</b></div>`;
+  }
+  bannerHtml += `<div style="font-size:10px; color:#cde; margin-top:3px;">${fromLabel}</div>`;
+  bannerHtml += '</div>';
 
   // 役一覧 (今回の hit のみ)
   let yakuHtml = bannerHtml + handHtml;
@@ -1829,8 +1860,9 @@ function showWinModal(seat, hand, context, result) {
   html += `<button id="win-tab-ko" class="win-tab" data-tab="ko" style="flex:1; padding:6px; border:1px solid #4a6; background:${defaultTab === 'ko' ? '#4caf50' : '#143820'}; color:#fff; cursor:pointer; border-radius:4px 4px 0 0; font-size:12px;">子で上がった場合</button>`;
   html += '</div>';
   html += `<div id="win-table-area">${buildTable(defaultTab)}</div>`;
-  html += `<p style="margin:8px 0 0; font-size:10px; color:#aac; text-align:left;">※ 30符固定の簡易点数表 (4麻標準)。 黄色行=該当翻数、 📍赤枠=今回の点数 (+本場・供託が加算)</p>`;
-  // 勝利演出の間 (カットイン ~1.2秒 + 公開手牌をひと目) を置いてから リザルト表示
+  html += `<p style="margin:8px 0 0; font-size:10px; color:#aac; text-align:left;">※ 30符固定の簡易点数表 (4麻標準)。 黄色行=該当翻数、 📍赤枠=今回の基本点 (これに本場・供託が足されます)</p>`;
+  // 勝利演出の間 (カットイン ~1.2秒 + 公開手牌をひと目 + 点数移動バッジ) を置いてから リザルト表示
+  setTimeout(() => showScoreBadges(transfers), 700);
   const WIN_REVEAL_MS = 2600;
   setTimeout(() => {
     playSE('win');

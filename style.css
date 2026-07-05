@@ -374,6 +374,26 @@ body {
 .riichi-guide__count { color: #ffeb3b; font-size: 10px; margin-right: 5px; }
 .riichi-guide__furiten { color: #ff8a80; font-size: 10px; font-weight: bold; margin-left: 4px; }
 
+/* ── 点数移動バッジ (勝利/流局時に 各席から ±点数がフワッと浮く) ── */
+.score-badge {
+  position: fixed;
+  z-index: 130;
+  transform: translateX(-50%);
+  font-size: 20px;
+  font-weight: bold;
+  pointer-events: none;
+  text-shadow: 0 1px 4px rgba(0,0,0,0.9), 0 0 8px rgba(0,0,0,0.6);
+  animation: badge-float 1.6s ease-out forwards;
+}
+.score-badge--plus { color: #ffeb3b; }
+.score-badge--minus { color: #ff8a80; }
+@keyframes badge-float {
+  0%   { opacity: 0; margin-top: 6px; }
+  15%  { opacity: 1; margin-top: 0; }
+  75%  { opacity: 1; }
+  100% { opacity: 0; margin-top: -34px; }
+}
+
 /* ── 宣言カットイン (リーチ/ロン/ツモ/北抜き の帯バナー演出) ── */
 .callout {
   position: fixed;

@@ -35,6 +35,8 @@ const NetGame = (() => {
     evSeq: 0,            // host: 演出イベント通番
     events: [],          // host: 直近イベント [{q, k}] (pub に載せる)
     lastEvSeq: -1,       // guest: 再生済みイベント seq (-1 = 初回pub未受信)
+    lastScores: null,    // guest: 前回pubのスコア (点数移動バッジ用)
+    wasRoundOver: false, // guest: roundOver 立ち上がり検出
   };
 
   const rotSeat = (seat, k) => (seat && ALL_SEATS.includes(seat))
@@ -522,7 +524,20 @@ const NetGame = (() => {
       }
     }
     // 局終了表示 (roundOver は endInfo より先に立つ = 勝利演出の「手牌公開の間」)
+    const prevScores = S.lastScores;
     G.roundOver = !!pub.roundOver || !!pub.endInfo;
+    // 点数移動バッジ (局終了の立ち上がりで、前回pubとのスコア差分を表示)
+    if (G.roundOver && !S.wasRoundOver && prevScores) {
+      const deltas = {};
+      let any = false;
+      for (const s of ALL_SEATS) {
+        const d = (G.scores[s] || 0) - (prevScores[s] || 0);
+        if (d) { deltas[s] = d; any = true; }
+      }
+      if (any) setTimeout(() => showScoreBadges(deltas), 400);
+    }
+    S.wasRoundOver = G.roundOver;
+    S.lastScores = { ...G.scores };
     if (pub.endInfo && !S.endInfoShown) {
       S.endInfoShown = true;
       showGuestEnd(pub.endInfo);
