@@ -84,7 +84,24 @@ const G = {
   tempFuriten: false,   // 見逃し → 次の自摸まで ロン不可
   // 最新の打牌 (河でハイライト表示する)
   lastDiscard: null,
+  // 各席の 直近ツモ牌 index (net対戦の 秘匿手牌配信用。 bottom は justDrawn と同値)
+  justDrawnAll: {},
+  // 半荘終了フラグ (net対戦でアクション受付を止める)
+  gameEnded: false,
 };
+
+// net対戦層 (netgame.js) が読み込まれていれば返す (未読込は null)
+function NETQ() { return (typeof NetGame !== 'undefined') ? NetGame : null; }
+// 席の表示名 (net対戦ではプレイヤー名、 ソロは あなた/下家/対面/上家)
+function seatLabel(seat) {
+  const n = NETQ();
+  return (n && n.seatDispName) ? n.seatDispName(seat) : SEAT_LABEL_BASE[seat];
+}
+// リモート席のロンオファー待ちか (ターン進行の追加ガード)
+function netOfferPending() {
+  const n = NETQ();
+  return !!(n && n.hasOffer && n.hasOffer());
+}
 
 // ─── 牌生成 + シャッフル ───────────────────────
 function buildAllTiles() {
@@ -873,7 +890,7 @@ function renderHeader() {
   if (cr) cr.textContent = remain;
   const ck = document.getElementById('center-kyotaku');
   if (ck) ck.textContent = G.kyotaku > 0 ? `供託${G.kyotaku}` : '';
-  const turnLabel = (G.turn === 'bottom') ? 'あなたの番' : `${SEAT_LABEL_BASE[G.turn]} の番`;
+  const turnLabel = (G.turn === 'bottom') ? 'あなたの番' : `${seatLabel(G.turn)} の番`;
   document.getElementById('game-turn').textContent = turnLabel;
 }
 
@@ -890,8 +907,8 @@ function renderSeats() {
     }
     seatEl.classList.remove('seat--empty');
     if (!labelEl) return;
-    let label = SEAT_LABEL_BASE[seat];
-    if (seat !== 'bottom') label += ' (CPU)';
+    let label = seatLabel(seat);
+    if (seat !== 'bottom' && label === SEAT_LABEL_BASE[seat]) label += ' (CPU)';
     if (G.oya === seat) label += '【親】';
     label += ` ${G.scores[seat].toLocaleString()}点`;
     if (G.isRiichi[seat]) label += ' 🔴リーチ';
@@ -910,6 +927,8 @@ function renderAll() {
   renderRiichiGuide();
   updateActionButtons();
   updateHint();
+  // net対戦ホスト: 描画のたびに 公開状態を配信 (debounce は netgame 側)
+  if (NETQ()) NETQ().onRender();
 }
 
 // ─── ヒントバー ────────────────────────────────
@@ -922,12 +941,12 @@ function updateHint() {
     return;
   }
   if (G.busy && G.turn !== 'bottom') {
-    hint.textContent = `🤖 ${SEAT_LABEL_BASE[G.turn]} が考え中…`;
+    hint.textContent = `🤖 ${seatLabel(G.turn)} が考え中…`;
     hint.classList.add('game__hint--cpu');
     return;
   }
   if (G.turn !== 'bottom') {
-    hint.textContent = `🤖 ${SEAT_LABEL_BASE[G.turn]} の番`;
+    hint.textContent = `⏳ ${seatLabel(G.turn)} の番`;
     hint.classList.add('game__hint--cpu');
     return;
   }
@@ -1260,6 +1279,7 @@ function drawTile(seat) {
   if (G.drawTiles.length === 0) return null;
   const tile = G.drawTiles.shift();
   G.hands[seat].push(tile);
+  G.justDrawnAll[seat] = G.hands[seat].length - 1;
   if (seat === 'bottom') G.justDrawn = G.hands.bottom.length - 1;
   return tile;
 }
@@ -1278,6 +1298,7 @@ function discardTile(seat, tile) {
   G.rivers[seat].push(tile);
   G.lastDiscard = tile;
   playSE('discard');
+  delete G.justDrawnAll[seat];
   if (seat === 'bottom') {
     G.selected = null;
     G.justDrawn = null;
@@ -1299,11 +1320,15 @@ function discardTile(seat, tile) {
         G.busy = true;
         playSE('alert');
         toast(`ロン可! 「ロン」 ボタンで あがれます`);
+      } else if (NETQ() && NETQ().isRemoteSeat(checkSeat)) {
+        // リモート人間: ロンオファーを送って本人の選択待ち (時間切れ=見逃し)
+        toast(`${seatLabel(checkSeat)} ロン確認中…`);
+        NETQ().offerRon(checkSeat, seat, tile);
       } else {
         // CPU ロン: 自動宣言 (roundOver で 以降のターン進行を停止)
         const test = [...G.hands[checkSeat], tile];
         announce('ron');
-        toast(`${SEAT_LABEL_BASE[checkSeat]} ロン! (${TILE_NAMES[tile.id]})`);
+        toast(`${seatLabel(checkSeat)} ロン! (${TILE_NAMES[tile.id]})`);
         G.busy = true;
         G.roundOver = true;
         setTimeout(() => showWinModal(checkSeat, test, ronCheck.ctx, ronCheck.result), 600);
@@ -1324,10 +1349,11 @@ function kitaNuki(seat) {
   // 嶺上 (王牌の カット側末尾) から補充
   const replacement = G.kingTiles.pop();
   G.hands[seat].push(replacement);
+  G.justDrawnAll[seat] = G.hands[seat].length - 1;
   if (seat === 'bottom') G.justDrawn = G.hands[seat].length - 1;
   playSE('kita');
   announce('kita');
-  toast(`${SEAT_LABEL_BASE[seat]} 北抜き (+1翻) / 抜き合計 ${G.kitas[seat]}`);
+  toast(`${seatLabel(seat)} 北抜き (+1翻) / 抜き合計 ${G.kitas[seat]}`);
   return true;
 }
 
@@ -1355,6 +1381,10 @@ function startTurn() {
     if (G.isRiichi.bottom && G.hands.bottom.length === 14 && G.justRiichiDeclared !== 'bottom') {
       handleRiichiAutoBottom();
     }
+  } else if (NETQ() && NETQ().isRemoteSeat(G.turn)) {
+    // リモート人間の番: ツモらせて 本人の操作待ち (netgame がタイムアウト管理)
+    drawTile(G.turn);
+    NETQ().remotePlay(G.turn);
   } else {
     G.busy = true;
     renderAll();
@@ -1400,7 +1430,7 @@ function handleRiichiAutoBottom() {
     discardTile('bottom', drawnTile);
     toast(`(リーチ自動打牌) ${TILE_NAMES[drawnTile.id]}`);
     renderAll();
-    if (G.pendingRon || G.roundOver) return;  // ロン発生時は 進行停止
+    if (G.pendingRon || G.roundOver || netOfferPending()) return;  // ロン発生時は 進行停止
     G.busy = false;
     setTimeout(() => { nextTurn(); startTurn(); }, 350);
   }, 700);
@@ -1431,7 +1461,7 @@ function cpuPlay(seat) {
       G.scores[seat] -= 1000;
       G.kyotaku += 1000;
       G.justRiichiDeclared = seat;  // 宣言ターン = この打牌が リーチ宣言牌 (横向き)
-      toast(`${SEAT_LABEL_BASE[seat]} リーチ! (-1000点)`);
+      toast(`${seatLabel(seat)} リーチ! (-1000点)`);
       // ※ 宣言ターンは テンパイ維持できる牌のみ捨てる (cpuDiscard 側で制限)
     }
   }
@@ -1460,7 +1490,7 @@ function cpuDiscard(seat, forceTsumoTile = false) {
     const result = calcYaku(G.hands[seat], ctx);
     if (!result.error && (result.han > 0 || result.isYakuman)) {
       announce('tsumo');
-      toast(`${SEAT_LABEL_BASE[seat]} ツモ!`);
+      toast(`${seatLabel(seat)} ツモ!`);
       G.roundOver = true;
       showWinModal(seat, G.hands[seat], ctx, result);
       G.busy = false;
@@ -1471,9 +1501,9 @@ function cpuDiscard(seat, forceTsumoTile = false) {
   if (forceTsumoTile) {
     const tile = G.hands[seat][G.hands[seat].length - 1];
     discardTile(seat, tile);
-    toast(`${SEAT_LABEL_BASE[seat]} (リーチ自動) ${TILE_NAMES[tile.id]}`);
+    toast(`${seatLabel(seat)} (リーチ自動) ${TILE_NAMES[tile.id]}`);
     renderAll();
-    if (G.pendingRon || G.roundOver) return;
+    if (G.pendingRon || G.roundOver || netOfferPending()) return;
     G.busy = false;
     setTimeout(() => { nextTurn(); startTurn(); }, 350);
     return;
@@ -1508,10 +1538,10 @@ function cpuDiscard(seat, forceTsumoTile = false) {
   }
   if (!target) target = cands[cands.length - 1];
   discardTile(seat, target);
-  toast(`${SEAT_LABEL_BASE[seat]} が ${TILE_NAMES[target.id]} を打牌`);
+  toast(`${seatLabel(seat)} が ${TILE_NAMES[target.id]} を打牌`);
   renderAll();
-  // ロン保留 / 局終了なら ターン進行を停止
-  if (G.pendingRon || G.roundOver) return;
+  // ロン保留 / リモートロンオファー / 局終了なら ターン進行を停止
+  if (G.pendingRon || G.roundOver || netOfferPending()) return;
   G.busy = false;
   setTimeout(() => { nextTurn(); startTurn(); }, 350);
 }
@@ -1542,9 +1572,9 @@ function endRound(reason) {
       for (const s of notenSeats) G.scores[s] -= payPer;
       for (const s of tenpaiSeats) G.scores[s] += recvPer;
     }
-    let txt = `山が尽きました。<br>テンパイ: ${tenpaiSeats.map(s => SEAT_LABEL_BASE[s]).join(', ') || 'なし'}<br>`;
+    let txt = `山が尽きました。<br>テンパイ: ${tenpaiSeats.map(s => seatLabel(s)).join(', ') || 'なし'}<br>`;
     txt += `点棒移動: ${notenSeats.length > 0 && tenpaiSeats.length > 0 ? '3000点 ノーテン→テンパイ' : 'なし'}<br>`;
-    txt += `現スコア: ${playingSeats.map(s => `${SEAT_LABEL_BASE[s]}=${G.scores[s].toLocaleString()}`).join(' / ')}`;
+    txt += `現スコア: ${playingSeats.map(s => `${seatLabel(s)}=${G.scores[s].toLocaleString()}`).join(' / ')}`;
     if (G.kyotaku > 0) txt += `<br>供託 ${G.kyotaku}点 は 次のあがり者へ持ち越し`;
     document.getElementById('end-text').innerHTML = txt;
     // 親流れ判定: 親がテンパイなら 連荘、 ノーテンなら 流れる (流局は 常に本場+1)
@@ -1556,6 +1586,11 @@ function endRound(reason) {
   G.roundOver = true;
   renderAll();  // 全員の手牌を表向き公開 (「盤面を見る」 用)
   document.getElementById('end-overlay').hidden = false;
+  // net対戦ホスト: 流局結果をゲストへ配信
+  if (NETQ()) {
+    NETQ().onEndRound(document.getElementById('end-title').textContent,
+      document.getElementById('end-text').innerHTML);
+  }
 }
 
 // ─── 勝利時の点数移動 (供託回収 + 本場加算込み) ─────
@@ -1626,7 +1661,7 @@ function showWinModal(seat, hand, context, result) {
     G.lastResult = 'koWin';    // 子あがり = 親流れ
   }
 
-  const whoLabel = (seat === 'bottom') ? 'あなた' : SEAT_LABEL_BASE[seat];
+  const whoLabel = (seat === 'bottom' && !(NETQ() && NETQ().isHost())) ? 'あなた' : seatLabel(seat);
   const winType = context.isTsumo ? 'ツモ' : 'ロン';
   const tier = hanToTier(result.han, result.isYakuman);
   const isOya = (G.oya === seat);
@@ -1729,10 +1764,10 @@ function showWinModal(seat, hand, context, result) {
   html += '<div style="background:rgba(76,175,80,0.12); padding:6px 8px; border-radius:6px; margin:6px 0; text-align:left; font-size:11px;">';
   html += '<b style="color:#4caf50;">点数移動:</b> ';
   html += playing.filter(s => transfers[s] !== 0)
-    .map(s => `${SEAT_LABEL_BASE[s]} <b style="color:${transfers[s] > 0 ? '#ffeb3b' : '#ff8a80'};">${transfers[s] > 0 ? '+' : ''}${transfers[s].toLocaleString()}</b>`)
+    .map(s => `${seatLabel(s)} <b style="color:${transfers[s] > 0 ? '#ffeb3b' : '#ff8a80'};">${transfers[s] > 0 ? '+' : ''}${transfers[s].toLocaleString()}</b>`)
     .join(' / ');
   html += '<br><b style="color:#4caf50;">現スコア:</b> ';
-  html += playing.map(s => `${SEAT_LABEL_BASE[s]}=${G.scores[s].toLocaleString()}`).join(' / ');
+  html += playing.map(s => `${seatLabel(s)}=${G.scores[s].toLocaleString()}`).join(' / ');
   html += '</div>';
   // タブ
   html += '<div style="display:flex; gap:4px; margin-top:8px;">';
@@ -1744,6 +1779,8 @@ function showWinModal(seat, hand, context, result) {
   textEl.innerHTML = html;
   renderAll();  // 全員の手牌を表向き公開 + ラベル点数更新 (「盤面を見る」用)
   overlay.hidden = false;
+  // net対戦ホスト: 結果をゲストへ配信
+  if (NETQ()) NETQ().onWinModal(titleEl.textContent, html);
 
   // タブ クリック
   document.querySelectorAll('.win-tab').forEach(btn => {
@@ -1772,9 +1809,11 @@ function nextRound() {
       const playingSeats = ALL_SEATS.filter(s => s !== G.emptySeat);
       const ranked = [...playingSeats].sort((a, b) => G.scores[b] - G.scores[a]);
       document.getElementById('end-text').innerHTML
-        = `東3局〜南3局まで完走しました。<br>最終スコア:<br>${ranked.map((s, i) => `${i + 1}位 ${SEAT_LABEL_BASE[s]} = ${G.scores[s].toLocaleString()}点`).join('<br>')}`;
+        = `東3局〜南3局まで完走しました。<br>最終スコア:<br>${ranked.map((s, i) => `${i + 1}位 ${seatLabel(s)} = ${G.scores[s].toLocaleString()}点`).join('<br>')}`;
       const nextBtn = document.getElementById('end-next');
       if (nextBtn) nextBtn.style.display = 'none';
+      G.gameEnded = true;
+      if (NETQ()) NETQ().onGameEnd('半荘終了', document.getElementById('end-text').innerHTML);
       return;
     }
     G.round = ROUND_ORDER[idx + 1];
@@ -1802,7 +1841,9 @@ function pickCpuPlacement() {
 
 // ─── 局開始 ────────────────────────────────
 function startNewRound() {
-  if (!G.cpuSeats || G.cpuSeats.length === 0) {
+  // 席が未割当のときのみ ランダム配置 (net対戦は hostStart が割当済 —
+  // ゲスト2人だと cpuSeats=[] になるため、 emptySeat 未設定を「未割当」の判定に使う)
+  if ((!G.cpuSeats || G.cpuSeats.length === 0) && !G.emptySeat) {
     const placement = pickCpuPlacement();
     G.cpuSeats = placement.cpuSeats;
     G.emptySeat = placement.emptySeat;
@@ -1845,6 +1886,7 @@ function startNewRound() {
   if (nextBtn) nextBtn.style.display = '';
   const peekReturn = document.getElementById('peek-return');
   if (peekReturn) peekReturn.hidden = true;
+  if (NETQ()) NETQ().onNewRound();  // net対戦: endInfo クリア
   renderAll();
 
   if (localStorage.getItem('omoroi-guide-done')) {
@@ -1962,6 +2004,8 @@ async function showDiceCeremony() {
 
 function closeDiceCeremony() {
   document.getElementById('dice-overlay').hidden = true;
+  // ガード: サイコロ未適用 (山0) や 二重呼び出し (配牌済で山55枚等) では配牌しない
+  if (G.drawTiles.length !== 94) return;
   // 配牌実施
   const dealt = dealHands(G.drawTiles, G.oya, G.cpuSeats, G.emptySeat);
   G.hands = dealt.hands;
@@ -2181,6 +2225,14 @@ if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator
 // ─── ゲーム初期化 ─────────────────────────
 function initGame() {
   const params = new URLSearchParams(location.search);
+  // net対戦 (?net=host / ?net=join&room=1234): netgame.js に委譲
+  const netMode = params.get('net');
+  if (netMode && NETQ()) {
+    G.mode = 'net';
+    G.type = 'hanchan';
+    NETQ().boot(netMode, params);
+    return;
+  }
   G.mode = params.get('mode') || 'cpu';
   G.type = params.get('type') || 'hanchan';
   G.round = '東1';
@@ -2231,11 +2283,13 @@ if (document.getElementById('table')) {
           return;
         }
       }
+      // net対戦ゲスト: アクション送信のみ (ホストが適用して状態が返る)
+      if (NETQ() && NETQ().isGuest()) { NETQ().sendDiscard(tile); return; }
       discardTile('bottom', tile);
       toast(`あなたが ${TILE_NAMES[tile.id]} を打牌`);
       renderAll();
-      // CPU がロンした場合 (busy/roundOver) は ターン進行しない
-      if (G.roundOver || G.busy) return;
+      // CPU/リモートがロンした場合 (busy/roundOver/オファー中) は ターン進行しない
+      if (G.roundOver || G.busy || netOfferPending()) return;
       setTimeout(() => { nextTurn(); startTurn(); }, 350);
     });
     document.getElementById('btn-kita')?.addEventListener('click', () => {
@@ -2244,6 +2298,7 @@ if (document.getElementById('table')) {
       // リーチ後は ツモった牌が北の時のみ (updateActionButtons と同条件)
       const drawnTile = (G.justDrawn != null) ? G.hands.bottom[G.justDrawn] : null;
       if (G.isRiichi.bottom && !(drawnTile && drawnTile.id === KITA_ID)) return;
+      if (NETQ() && NETQ().isGuest()) { NETQ().guestAction('kita'); return; }
       kitaNuki('bottom');
       renderAll();
     });
@@ -2258,6 +2313,7 @@ if (document.getElementById('table')) {
       const result = calcYaku(G.hands.bottom, ctx);
       if (result.error) { toast(result.error); return; }
       if (result.han === 0 && !result.isYakuman) { toast('役なし'); return; }
+      if (NETQ() && NETQ().isGuest()) { announce('tsumo'); NETQ().guestAction('tsumo'); return; }
       announce('tsumo');
       showWinModal('bottom', G.hands.bottom, ctx, result);
     });
@@ -2270,6 +2326,7 @@ if (document.getElementById('table')) {
                     isIppatsu: G.riichiTurnsLeft.bottom > 0, winTile: tile, fromSeat };
       const result = calcYaku(test, ctx);
       if (result.error) { toast(result.error); return; }
+      if (NETQ() && NETQ().isGuest()) { announce('ron'); NETQ().guestAction('ron'); return; }
       G.pendingRon = null;
       G.busy = false;
       announce('ron');
@@ -2277,6 +2334,7 @@ if (document.getElementById('table')) {
     });
     document.getElementById('btn-pass')?.addEventListener('click', () => {
       if (!G.pendingRon || G.roundOver) return;
+      if (NETQ() && NETQ().isGuest()) { NETQ().guestAction('pass'); return; }
       // 見逃し: リーチ中は この局ずっとロン不可、 通常は 次の自摸まで ロン不可 (フリテン)
       if (G.isRiichi.bottom) G.passFuriten = true;
       else G.tempFuriten = true;
@@ -2302,6 +2360,7 @@ if (document.getElementById('table')) {
       }
       if (G.isRiichi.bottom || G.scores.bottom < 1000) return;
       if (!canDeclareRiichi(G.hands.bottom)) return;
+      if (NETQ() && NETQ().isGuest()) { announce('riichi'); NETQ().guestAction('riichi'); return; }
       G.isRiichi.bottom = true;
       G.riichiTurnsLeft.bottom = 4;  // 一発: 自分含めて 4ターン以内
       G.scores.bottom -= 1000;

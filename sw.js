@@ -5,7 +5,7 @@
 //   - HTML: ネットワーク優先 + オフライン時はキャッシュ (更新が確実に届く)
 //   - version.json: ネットワーク優先 (最新バージョン表示用)
 // ※ リリース時は SW_VERSION を index/game.html の ?v= と同じ値に bump すること
-const SW_VERSION = '0.7.22';
+const SW_VERSION = '0.8.0';
 const CACHE_NAME = `omoroi-sanma-${SW_VERSION}`;
 
 const TILE_FILES = [
@@ -23,6 +23,9 @@ const PRECACHE = [
   'game',  // Cloudflare Pages の クリーンURL (308リダイレクト先)
   `style.css?v=${SW_VERSION}`,
   `script.js?v=${SW_VERSION}`,
+  `firebase-config.js?v=${SW_VERSION}`,
+  `net.js?v=${SW_VERSION}`,
+  `netgame.js?v=${SW_VERSION}`,
   'manifest.json',
   ...TILE_FILES.map(f => 'assets/' + encodeURIComponent(f)),
   // ボイスファイル (未配置なら 404 → allSettled で skip、 配置後に自動キャッシュ)
@@ -65,8 +68,8 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // 画像 / CSS / JS / ボイス: キャッシュ優先 (通信料削減の本体)
-  if (/\.(png|css|js|mp3|wav)$/.test(url.pathname)) {
+  // 画像 / CSS / JS: キャッシュ優先 (通信料削減の本体)
+  if (/\.(png|css|js)$/.test(url.pathname)) {
     event.respondWith(
       caches.match(req).then(hit => hit || fetch(req).then(res => {
         if (res.ok) {

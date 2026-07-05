@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="theme-color" content="#0d3b1f">
-  <link rel="stylesheet" href="style.css?v=0.7.22">
+  <link rel="stylesheet" href="style.css?v=0.8.0">
   <title>対戦中 — おもろい三麻</title>
 </head>
 <body class="game-body">
@@ -118,7 +118,6 @@
   </div>
 
   <div class="toast" id="toast" hidden></div>
-  <button class="peek-return" id="peek-return" hidden>📊 結果に戻る</button>
 
   <!-- 宣言カットイン演出 (リーチ/ロン/ツモ/北抜き) -->
   <div class="callout" id="callout" hidden>
@@ -131,12 +130,14 @@
       <p class="end-modal__text" id="end-text">山が尽きました。</p>
       <div class="end-modal__nav">
         <button class="end-modal__btn" id="end-next">次の局へ</button>
-        <button class="end-modal__btn end-modal__btn--secondary" id="end-peek">👀 盤面を見る</button>
         <a href="index.html" class="end-modal__btn end-modal__btn--secondary">ロビーへ</a>
       </div>
     </div>
   </div>
 
-  <script src="script.js?v=0.7.22"></script>
+  <script src="firebase-config.js?v=0.8.0"></script>
+  <script src="net.js?v=0.8.0"></script>
+  <script src="script.js?v=0.8.0"></script>
+  <script src="netgame.js?v=0.8.0"></script>
 </body>
 </html>

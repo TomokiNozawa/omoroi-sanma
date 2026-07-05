@@ -6,7 +6,7 @@
   <meta name="description" content="おもろい三麻 - 初心者向け 三人麻雀 Webアプリ (関西ルール / 翻数のみ / 全部赤ドラ / 北抜きあり)">
   <meta name="theme-color" content="#0d3b1f">
   <link rel="manifest" href="manifest.json">
-  <link rel="stylesheet" href="style.css?v=0.7.22">
+  <link rel="stylesheet" href="style.css?v=0.8.0">
   <title>おもろい三麻 — 初心者向け三人麻雀</title>
 </head>
 <body>
@@ -29,17 +29,39 @@
         <span class="lobby__btn-desc">CPU 2人と 1局のみ</span>
       </a>
 
-      <button class="lobby__btn lobby__btn--disabled" disabled>
+      <button class="lobby__btn" id="btn-room-create">
         <span class="lobby__btn-icon">👥</span>
         <span class="lobby__btn-label">ルーム作成</span>
-        <span class="lobby__btn-desc">Phase 2 で開放予定</span>
+        <span class="lobby__btn-desc">合言葉を発行して 友だちと対戦</span>
       </button>
 
-      <button class="lobby__btn lobby__btn--disabled" disabled>
+      <button class="lobby__btn" id="btn-room-join">
         <span class="lobby__btn-icon">🔗</span>
         <span class="lobby__btn-label">ルーム参加</span>
-        <span class="lobby__btn-desc">Phase 2 で開放予定</span>
+        <span class="lobby__btn-desc">合言葉 (4桁) を入力して参加</span>
       </button>
+    </div>
+
+    <!-- ルーム作成/参加 ダイアログ -->
+    <div class="guide-overlay" id="room-dialog" hidden>
+      <div class="guide-modal">
+        <h2 class="guide-modal__title" id="room-dialog-title">ルーム作成</h2>
+        <div style="display:flex; flex-direction:column; gap:10px; margin:12px 0;">
+          <label style="font-size:12px; color:#aac;">ニックネーム (10文字まで)
+            <input type="text" id="room-name" maxlength="10" placeholder="れい: のざわ"
+              style="width:100%; box-sizing:border-box; margin-top:4px; padding:10px; border-radius:8px; border:1px solid #4a6; background:#0a2818; color:#fff; font-size:15px;">
+          </label>
+          <label id="room-code-row" style="font-size:12px; color:#aac;" hidden>合言葉 (4桁の数字)
+            <input type="tel" id="room-code" maxlength="4" inputmode="numeric" placeholder="1234"
+              style="width:100%; box-sizing:border-box; margin-top:4px; padding:10px; border-radius:8px; border:1px solid #4a6; background:#0a2818; color:#fff; font-size:20px; letter-spacing:6px; text-align:center;">
+          </label>
+          <p id="room-dialog-note" style="font-size:11px; color:#688; margin:0;"></p>
+        </div>
+        <div class="guide-modal__nav">
+          <button class="guide-modal__skip" id="room-cancel">やめる</button>
+          <button class="guide-modal__next" id="room-go">すすむ →</button>
+        </div>
+      </div>
     </div>
 
     <footer class="lobby__footer">
@@ -49,6 +71,56 @@
     </footer>
   </main>
 
-  <script src="script.js?v=0.7.22"></script>
+  <script src="firebase-config.js?v=0.8.0"></script>
+  <script src="script.js?v=0.8.0"></script>
+  <script>
+    // ルーム作成/参加 ダイアログ (合言葉制)
+    (function () {
+      const dialog = document.getElementById('room-dialog');
+      const nameIn = document.getElementById('room-name');
+      const codeRow = document.getElementById('room-code-row');
+      const codeIn = document.getElementById('room-code');
+      const note = document.getElementById('room-dialog-note');
+      const isLocal = new URLSearchParams(location.search).get('local') === '1';
+      let mode = 'host';
+      function open(m) {
+        mode = m;
+        if (!isLocal && (typeof FIREBASE_CONFIG === 'undefined' || !FIREBASE_CONFIG)) {
+          alert('ルーム対戦は 準備中です (サーバ設定待ち)。もう少しお待ちください!');
+          return;
+        }
+        document.getElementById('room-dialog-title').textContent =
+          m === 'host' ? '👥 ルーム作成' : '🔗 ルーム参加';
+        codeRow.hidden = (m === 'host');
+        note.textContent = m === 'host'
+          ? '作成すると 4桁の合言葉が発行されます。参加者に伝えてください。'
+          : 'ホストから聞いた 4桁の合言葉を入力してください。';
+        nameIn.value = localStorage.getItem('omoroi-nickname') || '';
+        dialog.hidden = false;
+        nameIn.focus();
+      }
+      function go() {
+        const name = nameIn.value.trim();
+        if (!name) { nameIn.focus(); return; }
+        localStorage.setItem('omoroi-nickname', name);
+        const local = isLocal ? '&local=1' : '';
+        if (mode === 'host') {
+          location.href = `game.html?net=host&name=${encodeURIComponent(name)}${local}`;
+        } else {
+          const code = codeIn.value.trim();
+          if (!/^\d{4}$/.test(code)) { codeIn.focus(); return; }
+          location.href = `game.html?net=join&room=${code}&name=${encodeURIComponent(name)}${local}`;
+        }
+      }
+      document.getElementById('btn-room-create')?.addEventListener('click', () => open('host'));
+      document.getElementById('btn-room-join')?.addEventListener('click', () => open('join'));
+      document.getElementById('room-cancel')?.addEventListener('click', () => { dialog.hidden = true; });
+      document.getElementById('room-go')?.addEventListener('click', go);
+      dialog?.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') go();
+        if (e.key === 'Escape') dialog.hidden = true;
+      });
+    })();
+  </script>
 </body>
 </html>
