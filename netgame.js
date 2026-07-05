@@ -30,6 +30,11 @@ const NetGame = (() => {
     endInfoShown: false,
     lastPubTime: 0,
     busySent: false,
+    ceremonySeq: 0,      // host: 儀式ごとに +1 (ゲストの再生トリガー)
+    seenCeremony: 0,     // guest: 再生済み儀式 seq
+    evSeq: 0,            // host: 演出イベント通番
+    events: [],          // host: 直近イベント [{q, k}] (pub に載せる)
+    lastEvSeq: -1,       // guest: 再生済みイベント seq (-1 = 初回pub未受信)
   };
 
   const rotSeat = (seat, k) => (seat && ALL_SEATS.includes(seat))
@@ -49,6 +54,8 @@ const NetGame = (() => {
     if (seat === 'bottom' && S.mode === 'host' && S.started && S.seatNames) return `${base} (あなた)`;
     return base;
   };
+  // 共有テキスト用の絶対名 ((あなた) 等の視点装飾なし)
+  const pubName = (seat) => (S.seatNames && S.seatNames[seat]) || SEAT_LABEL_BASE[seat];
 
   // ─── 待機画面 ─────────────────────────
   function showWaiting(html) {
@@ -161,8 +168,10 @@ const NetGame = (() => {
     G.cpuSeats = seats.slice(guestUids.length, guestUids.length + cpuCount);
     G.emptySeat = seats[2];
     // 表示名 (公開するのは素の名前。 「(あなた)」 は各クライアントが自分の bottom にだけ付ける)
+    // CPU席にも絶対名を付与 (視点語「下家(CPU)」だと ホスト視点の言葉が全員に見えてしまう)
     S.seatNames = { bottom: S.name };
     for (const st of Object.keys(S.remoteSeats)) S.seatNames[st] = S.players[S.remoteSeats[st]].name;
+    G.cpuSeats.forEach((st, i) => { S.seatNames[st] = `CPU${['①', '②'][i] || ''}`; });
     S.started = true;
     S.net.setVal(`rooms/${S.room}/meta/status`, 'playing');
     // ゲストへ座席通知 (秘匿手牌パスに 席情報を先行送信)
@@ -196,6 +205,12 @@ const NetGame = (() => {
       startSeat: G.startSeat, cutPosInStart: G.cutPosInStart,
       lastDiscardSeat: lastDiscardSeat(),
       seatNames: S.seatNames,
+      phase: G.ceremonyActive ? 'dice' : 'play',
+      roundOver: !!G.roundOver,
+      handsOpen: G.roundOver ? G.hands : null,  // 局終了後は全手牌公開 (勝利演出/テンパイ確認)
+      dice: (G.diceD1 ? [G.diceD1, G.diceD2] : null),
+      ceremonySeq: S.ceremonySeq,
+      events: S.events,
       ronOffer: S.pendingOffer
         ? { seat: S.pendingOffer.seat, fromSeat: S.pendingOffer.fromSeat, tile: S.pendingOffer.tile }
         : null,
@@ -237,10 +252,24 @@ const NetGame = (() => {
     if (S.pubTimer) clearTimeout(S.pubTimer);
     S.pubTimer = setTimeout(publish, 60);
   }
+  // 儀式開始 (showDiceCeremony がサイコロ適用直後に呼ぶ): 即公開してゲストにも再生させる
+  function onCeremony() {
+    if (!isHost()) return;
+    S.ceremonySeq++;
+    publish();
+  }
+  // 宣言演出 (announce がホスト側で呼ぶ): イベントとして pub に載せる
+  function recordEvent(kind) {
+    if (!isHost()) return;
+    S.evSeq++;
+    S.events.push({ q: S.evSeq, k: kind });
+    if (S.events.length > 6) S.events.shift();
+    publish();
+  }
 
   // ─── ホスト: リモート番の進行 ──────────────────
   function remotePlay(seat) {
-    // リーチ済リモート: CPU と同じ自動進行 (北自動抜き → ツモ勝ち → ツモ切り)
+    // リーチ済リモート: 自動進行 (北自動抜き → ツモ勝ち → ツモ切り、 雀魂の自動和了と同様)
     if (G.isRiichi[seat] && G.justRiichiDeclared !== seat) {
       let drawn = G.hands[seat][G.hands[seat].length - 1];
       while (drawn && drawn.id === KITA_ID && G.kingTiles.length > 0) {
@@ -248,7 +277,9 @@ const NetGame = (() => {
         renderAll();
         drawn = G.hands[seat][G.hands[seat].length - 1];
       }
-      setTimeout(() => cpuDiscard(seat, true), 500);
+      // ツモった14枚目を全クライアントに見せてから捨てる (河に直行させない)
+      renderAll();
+      setTimeout(() => cpuDiscard(seat, true), 1100);
       return;
     }
     // 通常: 公開して 本人の操作待ち (タイムアウトで CPU 代打ち)
@@ -310,8 +341,7 @@ const NetGame = (() => {
     G.scores[seat] -= 1000;
     G.kyotaku += 1000;
     G.justRiichiDeclared = seat;
-    playSE('riichi');
-    announce('riichi');
+    // 発声/カットインは宣言牌の打牌時 (discardTile) に一本化
     toast(`${seatDispName(seat)} リーチ! (-1000点)`);
     renderAll();
     armTurnTimeout(seat);  // 宣言牌の打牌待ち
@@ -332,7 +362,7 @@ const NetGame = (() => {
     if (!isWinning(G.hands[seat])) return;
     const drawnIdx = (G.justDrawnAll && G.justDrawnAll[seat] != null) ? G.justDrawnAll[seat] : null;
     const ctx = {
-      isTsumo: true, isRiichi: G.isRiichi[seat], isOya: G.oya === seat,
+      isTsumo: true, isRiichi: G.isRiichi[seat], isOya: G.oya === seat, seatWind: seatWindOf(seat),
       doraIndicator: G.doraIndicator, kitas: G.kitas[seat], round: G.round,
       isIppatsu: G.riichiTurnsLeft[seat] > 0,
       winTile: drawnIdx != null ? G.hands[seat][drawnIdx] : null,
@@ -351,7 +381,7 @@ const NetGame = (() => {
     S.pendingOffer = null;
     const test = [...G.hands[seat], tile];
     const ctx = {
-      isTsumo: false, isRiichi: G.isRiichi[seat], isOya: G.oya === seat,
+      isTsumo: false, isRiichi: G.isRiichi[seat], isOya: G.oya === seat, seatWind: seatWindOf(seat),
       doraIndicator: G.doraIndicator, kitas: G.kitas[seat], round: G.round,
       isIppatsu: G.riichiTurnsLeft[seat] > 0, winTile: tile, fromSeat,
     };
@@ -438,10 +468,12 @@ const NetGame = (() => {
     G.rivers = rotKeys(pub.rivers, k);
     ALL_SEATS.forEach(s => { if (!G.rivers[s]) G.rivers[s] = []; });
     // 他家の手牌は 枚数のみ (伏せ牌)、 自分の手は ingestHand で反映
+    // 局終了後 (handsOpen) は全手牌が公開される (勝利演出/テンパイ確認)
     const counts = rotKeys(pub.handCounts, k);
+    const open = pub.handsOpen ? rotKeys(pub.handsOpen, k) : null;
     ALL_SEATS.forEach(s => {
       if (s === 'bottom') return;
-      G.hands[s] = new Array(counts[s] || 0).fill({ id: 0, copy: 0 });
+      G.hands[s] = (open && open[s]) ? open[s] : new Array(counts[s] || 0).fill({ id: 0, copy: 0 });
     });
     G.drawTiles = new Array(pub.remain || 0).fill(null);
     G.kingTiles = new Array(pub.kingRemain || 0).fill(null);
@@ -465,8 +497,32 @@ const NetGame = (() => {
     } else {
       G.pendingRon = null;
     }
-    // 局終了表示
-    G.roundOver = !!pub.endInfo;
+    // 演出イベント再生 (リーチ/ロン/ツモ/北抜き のカットイン+ボイス)
+    // 初回受信 (途中参加/再接続) では過去イベントを再生しない
+    const evs = pub.events || [];
+    if (S.lastEvSeq < 0) {
+      S.lastEvSeq = evs.reduce((m, e) => Math.max(m, e.q), 0);
+    } else {
+      for (const e of evs) {
+        if (e.q > S.lastEvSeq) { S.lastEvSeq = e.q; announce(e.k); }
+      }
+    }
+    // サイコロ儀式: ホストと同じサイコロ値・壁で再生 (山分けを全員で確認)
+    if (pub.phase === 'dice' && pub.dice && pub.ceremonySeq > S.seenCeremony) {
+      S.seenCeremony = pub.ceremonySeq;
+      G._guestCeremonyAnimDone = false;
+      G._guestCeremonyCloseWanted = false;
+      setTimeout(() => showDiceCeremony({ guest: true, d1: pub.dice[0], d2: pub.dice[1] }), 200);
+    } else if (pub.phase !== 'dice') {
+      // ホストが配牌 → ゲスト儀式はアニメ完了を待って閉じる
+      const dov = document.getElementById('dice-overlay');
+      if (dov && !dov.hidden) {
+        if (G._guestCeremonyAnimDone) closeGuestCeremony();
+        else G._guestCeremonyCloseWanted = true;
+      }
+    }
+    // 局終了表示 (roundOver は endInfo より先に立つ = 勝利演出の「手牌公開の間」)
+    G.roundOver = !!pub.roundOver || !!pub.endInfo;
     if (pub.endInfo && !S.endInfoShown) {
       S.endInfoShown = true;
       showGuestEnd(pub.endInfo);
@@ -514,10 +570,11 @@ const NetGame = (() => {
 
   return {
     boot, onRender, onWinModal, onEndRound, onGameEnd, onNewRound,
+    onCeremony, recordEvent,
     offerRon, remotePlay, isRemoteSeat, hasOffer,
     isGuest, isHost,
     guestAction, sendDiscard,
-    seatDispName,
+    seatDispName, pubName,
     _S: S,
   };
 })();
