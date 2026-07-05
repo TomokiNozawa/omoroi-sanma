@@ -6,7 +6,7 @@
   <meta name="description" content="おもろい三麻 - 初心者向け 三人麻雀 Webアプリ (関西ルール / 翻数のみ / 全部赤ドラ / 北抜きあり)">
   <meta name="theme-color" content="#0d3b1f">
   <link rel="manifest" href="manifest.json">
-  <link rel="stylesheet" href="style.css?v=0.8.1">
+  <link rel="stylesheet" href="style.css?v=0.8.1i">
   <title>おもろい三麻 — 初心者向け三人麻雀</title>
 </head>
 <body>
@@ -42,6 +42,12 @@
       </button>
     </div>
 
+    <!-- ルールオプション (ソロ/ルーム共通、 localStorage 保持) -->
+    <div class="lobby__opts" style="display:flex; gap:18px; justify-content:center; margin:10px 0 0; font-size:12px; color:#cde;">
+      <label style="cursor:pointer; display:flex; align-items:center; gap:5px;"><input type="checkbox" id="opt-naki" checked> ポン・明槓あり</label>
+      <label style="cursor:pointer; display:flex; align-items:center; gap:5px;"><input type="checkbox" id="opt-tobi" checked> トビ終了あり</label>
+    </div>
+
     <!-- ルーム作成/参加 ダイアログ -->
     <div class="guide-overlay" id="room-dialog" hidden>
       <div class="guide-modal">
@@ -71,8 +77,8 @@
     </footer>
   </main>
 
-  <script src="firebase-config.js?v=0.8.1"></script>
-  <script src="script.js?v=0.8.1"></script>
+  <script src="firebase-config.js?v=0.8.1i"></script>
+  <script src="script.js?v=0.8.1i"></script>
   <script>
     // ルーム作成/参加 ダイアログ (合言葉制)
     (function () {
@@ -105,13 +111,29 @@
         localStorage.setItem('omoroi-nickname', name);
         const local = isLocal ? '&local=1' : '';
         if (mode === 'host') {
-          location.href = `game.html?net=host&name=${encodeURIComponent(name)}${local}`;
+          location.href = `game.html?net=host&name=${encodeURIComponent(name)}${local}${optQuery()}`;
         } else {
           const code = codeIn.value.trim();
           if (!/^\d{4}$/.test(code)) { codeIn.focus(); return; }
           location.href = `game.html?net=join&room=${code}&name=${encodeURIComponent(name)}${local}`;
         }
       }
+      // ルールオプション (ソロのリンク書換 + ルーム作成URLに付与)
+      const nakiCb = document.getElementById('opt-naki');
+      const tobiCb = document.getElementById('opt-tobi');
+      const optQuery = () => `${nakiCb.checked ? '' : '&naki=0'}${tobiCb.checked ? '' : '&tobi=0'}`;
+      function applyOpts() {
+        document.querySelectorAll('.lobby__menu a[href*="game.html"]').forEach(a => {
+          a.href = a.href.replace(/&(naki|tobi)=0/g, '') + optQuery();
+        });
+      }
+      const loadOpt = (cb, key) => {
+        cb.checked = localStorage.getItem(key) !== '0';
+        cb.addEventListener('change', () => { localStorage.setItem(key, cb.checked ? '1' : '0'); applyOpts(); });
+      };
+      loadOpt(nakiCb, 'omoroi-opt-naki');
+      loadOpt(tobiCb, 'omoroi-opt-tobi');
+      applyOpts();
       document.getElementById('btn-room-create')?.addEventListener('click', () => open('host'));
       document.getElementById('btn-room-join')?.addEventListener('click', () => open('join'));
       document.getElementById('room-cancel')?.addEventListener('click', () => { dialog.hidden = true; });
