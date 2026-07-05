@@ -194,6 +194,8 @@ function applyDice(walls, diceTotal, oyaSeat = 'bottom') {
   const doraSeat = dorPos.seat;
   const doraDouIdx = dorPos.douIdx0;
   const doraIndicator = walls[doraSeat][douToArrIdx(doraDouIdx, 'top')];
+  // 裏ドラ表示牌 = ドラ表示牌と同じ幢の下段 (リーチ和了時のみ公開・加算)
+  const uraIndicator = walls[doraSeat][douToArrIdx(doraDouIdx, 'bot')];
 
   // 王牌 = ドラ (X-3) を中心に 7幢ペア (= 14牌) = カット位置直右の X幢目 〜 X-6幢目
   // (カット位置より右側の 7幢が王牌、 という麻雀の物理配置と一致)
@@ -241,7 +243,7 @@ function applyDice(walls, diceTotal, oyaSeat = 'bottom') {
   // (5) 起点家: 1幢目 〜 X幢目 (王牌外の残り)
   for (let d = 0; d <= X - 1; d++) addAllExceptKing(startSeat, d);
 
-  return { startSeat, cutPosInStart: X, kingTiles, drawTiles, doraIndicator,
+  return { startSeat, cutPosInStart: X, kingTiles, drawTiles, doraIndicator, uraIndicator,
            doraSeat, doraDouIdx, kingPosList, kingCells, drawPosList };
 }
 
@@ -626,7 +628,7 @@ const YAKU_DISPLAY_ORDER = [
   'ピンフ', 'タンヤオ', '一盃口',
   '白', '發', '中', '場風 東', '場風 南', '自風 東', '自風 南', '自風 西',
   '七対子', '対々和', '三暗刻', '一気通貫', '二盃口', '混一色', '清一色',
-  'ドラ', '赤ドラ', '北抜き',
+  'ドラ', '赤ドラ', '裏ドラ', '北抜き',
 ];
 function yakuOrderIdx(name) {
   const i = YAKU_DISPLAY_ORDER.findIndex(o => name === o || name.startsWith(o));
@@ -691,6 +693,11 @@ function calcYaku(hand, context) {
   if (doraCount > 0) { yakuList.push({ name: 'ドラ', han: doraCount }); han += doraCount; }
   const akaCount = hand.filter(t => t.isRed).length;
   if (akaCount > 0) { yakuList.push({ name: '赤ドラ', han: akaCount }); han += akaCount; }
+  // 裏ドラ (リーチ和了時のみ、 王牌のドラ表示牌の下段をめくる)
+  if (context.isRiichi && context.uraIndicator) {
+    const uraCount = countDora(hand, context.uraIndicator);
+    if (uraCount > 0) { yakuList.push({ name: '裏ドラ', han: uraCount }); han += uraCount; }
+  }
   if (context.kitas > 0) { yakuList.push({ name: `北抜き×${context.kitas}`, han: context.kitas }); han += context.kitas; }
 
   // 表示順を慣例順に整列: リーチ系 → 手役 → ドラ系 (雀魂等と同じ並び)
@@ -1144,7 +1151,7 @@ function updateActionButtons() {
     if (isWinning(G.hands.bottom)) {
       const result = calcYaku(G.hands.bottom, {
         isTsumo: true, isRiichi: G.isRiichi.bottom, isOya: G.oya === 'bottom', seatWind: seatWindOf('bottom'),
-        doraIndicator: G.doraIndicator, kitas: G.kitas.bottom, round: G.round,
+        doraIndicator: G.doraIndicator, uraIndicator: G.uraIndicator, kitas: G.kitas.bottom, round: G.round,
         isIppatsu: G.riichiTurnsLeft.bottom > 0, winTile: drawnTile,
       });
       canTsumo = !result.error && (result.han > 0 || result.isYakuman);
@@ -1297,7 +1304,7 @@ function checkRonForSeat(seat, fromSeat, tile) {
   if (seat === 'bottom' && (G.passFuriten || G.tempFuriten)) return null;
   const ctx = {
     isTsumo: false, isRiichi: G.isRiichi[seat], isOya: G.oya === seat, seatWind: seatWindOf(seat),
-    doraIndicator: G.doraIndicator, kitas: G.kitas[seat], round: G.round,
+    doraIndicator: G.doraIndicator, uraIndicator: G.uraIndicator, kitas: G.kitas[seat], round: G.round,
     isIppatsu: G.riichiTurnsLeft[seat] > 0,
     winTile: tile, fromSeat,
   };
@@ -1473,7 +1480,7 @@ function handleRiichiAutoBottom() {
   if (isWinning(G.hands.bottom)) {
     const result = calcYaku(G.hands.bottom, {
       isTsumo: true, isRiichi: true, isOya: G.oya === 'bottom', seatWind: seatWindOf('bottom'),
-      doraIndicator: G.doraIndicator, kitas: G.kitas.bottom, round: G.round,
+      doraIndicator: G.doraIndicator, uraIndicator: G.uraIndicator, kitas: G.kitas.bottom, round: G.round,
       isIppatsu: G.riichiTurnsLeft.bottom > 0, winTile: drawnTile,
     });
     canTsumoNow = !result.error && (result.han > 0 || result.isYakuman);
@@ -1543,7 +1550,7 @@ function cpuDiscard(seat, forceTsumoTile = false) {
     const drawn = G.hands[seat][G.hands[seat].length - 1];
     const ctx = {
       isTsumo: true, isRiichi: G.isRiichi[seat], isOya: G.oya === seat, seatWind: seatWindOf(seat),
-      doraIndicator: G.doraIndicator, kitas: G.kitas[seat], round: G.round,
+      doraIndicator: G.doraIndicator, uraIndicator: G.uraIndicator, kitas: G.kitas[seat], round: G.round,
       isIppatsu: G.riichiTurnsLeft[seat] > 0, winTile: drawn,
     };
     const result = calcYaku(G.hands[seat], ctx);
@@ -1799,8 +1806,19 @@ function showWinModal(seat, hand, context, result) {
   bannerHtml += `<div style="font-size:10px; color:#cde; margin-top:3px;">${fromLabel}</div>`;
   bannerHtml += '</div>';
 
+  // ドラ確認セクション (表ドラ + リーチ和了なら裏ドラも公開)
+  const tinyTile = (t) => tileSpanHtml(t, 'width:20px; height:27px; vertical-align:middle;');
+  let doraHtml = '<div style="background:rgba(0,0,0,0.25); padding:6px 8px; border-radius:6px; margin:6px 0; font-size:11px; text-align:left;">';
+  if (G.doraIndicator) {
+    doraHtml += `<b style="color:#4fc3f7;">ドラ表示牌:</b> ${tinyTile(G.doraIndicator)} <small style="color:#aac;">→ ドラは「${TILE_NAMES[nextTileId(G.doraIndicator.id)]}」</small>`;
+  }
+  if (context.isRiichi && G.uraIndicator) {
+    doraHtml += `<br><b style="color:#ce93d8;">裏ドラ表示牌:</b> ${tinyTile(G.uraIndicator)} <small style="color:#aac;">→ 裏ドラは「${TILE_NAMES[nextTileId(G.uraIndicator.id)]}」 (リーチしていたので公開)</small>`;
+  }
+  doraHtml += '</div>';
+
   // 役一覧 (今回の hit のみ)
-  let yakuHtml = bannerHtml + handHtml;
+  let yakuHtml = bannerHtml + handHtml + doraHtml;
   yakuHtml += '<div style="background:rgba(255,235,59,0.12); padding:6px 8px; border-radius:6px; margin:6px 0; text-align:left; font-size:11px;">';
   yakuHtml += '<b style="color:#ffeb3b;">今回の役:</b> ';
   yakuHtml += result.yakuList.map(y => `${y.name}<small>(${y.han}翻)</small>`).join(' / ');
@@ -1964,6 +1982,7 @@ function startNewRound() {
   G.kingTiles = [];
   G.drawTiles = [];
   G.doraIndicator = null;
+  G.uraIndicator = null;
   G.doraSeat = null;
   G.doraDouIdx = -1;
   G.drawPosList = [];
@@ -2051,6 +2070,7 @@ async function showDiceCeremony(preset) {
     G.drawPosList = r.drawPosList;
     G.kingCells = r.kingCells;
     G.doraIndicator = r.doraIndicator;
+    G.uraIndicator = r.uraIndicator;
     // net-host: サイコロ値+壁データを即公開 → ゲストも同じ儀式を再生
     if (NETQ() && NETQ().isHost()) NETQ().onCeremony();
   }
@@ -2430,7 +2450,7 @@ if (document.getElementById('table')) {
       if (G.hands.bottom.length !== 14 || !isWinning(G.hands.bottom)) return;
       const drawnTile = (G.justDrawn != null) ? G.hands.bottom[G.justDrawn] : null;
       const ctx = { isTsumo: true, isRiichi: G.isRiichi.bottom, isOya: G.oya === 'bottom', seatWind: seatWindOf('bottom'),
-                    doraIndicator: G.doraIndicator, kitas: G.kitas.bottom, round: G.round,
+                    doraIndicator: G.doraIndicator, uraIndicator: G.uraIndicator, kitas: G.kitas.bottom, round: G.round,
                     isIppatsu: G.riichiTurnsLeft.bottom > 0, winTile: drawnTile };
       const result = calcYaku(G.hands.bottom, ctx);
       if (result.error) { toast(result.error); return; }
@@ -2444,7 +2464,7 @@ if (document.getElementById('table')) {
       const { tile, fromSeat } = G.pendingRon;
       const test = [...G.hands.bottom, tile];
       const ctx = { isTsumo: false, isRiichi: G.isRiichi.bottom, isOya: G.oya === 'bottom', seatWind: seatWindOf('bottom'),
-                    doraIndicator: G.doraIndicator, kitas: G.kitas.bottom, round: G.round,
+                    doraIndicator: G.doraIndicator, uraIndicator: G.uraIndicator, kitas: G.kitas.bottom, round: G.round,
                     isIppatsu: G.riichiTurnsLeft.bottom > 0, winTile: tile, fromSeat };
       const result = calcYaku(test, ctx);
       if (result.error) { toast(result.error); return; }

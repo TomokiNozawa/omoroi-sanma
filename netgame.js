@@ -365,7 +365,7 @@ const NetGame = (() => {
     const drawnIdx = (G.justDrawnAll && G.justDrawnAll[seat] != null) ? G.justDrawnAll[seat] : null;
     const ctx = {
       isTsumo: true, isRiichi: G.isRiichi[seat], isOya: G.oya === seat, seatWind: seatWindOf(seat),
-      doraIndicator: G.doraIndicator, kitas: G.kitas[seat], round: G.round,
+      doraIndicator: G.doraIndicator, uraIndicator: G.uraIndicator, kitas: G.kitas[seat], round: G.round,
       isIppatsu: G.riichiTurnsLeft[seat] > 0,
       winTile: drawnIdx != null ? G.hands[seat][drawnIdx] : null,
     };
@@ -384,7 +384,7 @@ const NetGame = (() => {
     const test = [...G.hands[seat], tile];
     const ctx = {
       isTsumo: false, isRiichi: G.isRiichi[seat], isOya: G.oya === seat, seatWind: seatWindOf(seat),
-      doraIndicator: G.doraIndicator, kitas: G.kitas[seat], round: G.round,
+      doraIndicator: G.doraIndicator, uraIndicator: G.uraIndicator, kitas: G.kitas[seat], round: G.round,
       isIppatsu: G.riichiTurnsLeft[seat] > 0, winTile: tile, fromSeat,
     };
     const result = calcYaku(test, ctx);
