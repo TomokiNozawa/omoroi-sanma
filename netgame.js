@@ -209,6 +209,9 @@ const NetGame = (() => {
       seatNames: S.seatNames,
       phase: G.ceremonyActive ? 'dice' : 'play',
       roundOver: !!G.roundOver,
+      melds: G.melds,
+      kanDora: G.kanDoraInd,
+      rules: G.rules,
       handsOpen: G.roundOver ? G.hands : null,  // 局終了後は全手牌公開 (勝利演出/テンパイ確認)
       dice: (G.diceD1 ? [G.diceD1, G.diceD2] : null),
       ceremonySeq: S.ceremonySeq,
@@ -308,6 +311,7 @@ const NetGame = (() => {
       if (act.type === 'discard') return hostApplyDiscard(seat, act.key);
       if (act.type === 'riichi') return hostApplyRiichi(seat);
       if (act.type === 'kita') return hostApplyKita(seat);
+      if (act.type === 'ankan') return hostApplyAnkan(seat, act.id);
       if (act.type === 'tsumo') return hostApplyTsumo(seat);
       if (act.type === 'ron') return hostApplyRon(seat);
       if (act.type === 'pass') return hostApplyPass(seat);
@@ -319,12 +323,12 @@ const NetGame = (() => {
     return G.hands[seat].find(t => tileKey(t) === key) || null;
   }
   function hostApplyDiscard(seat, key) {
-    if (G.roundOver || G.turn !== seat || G.hands[seat].length !== 14) return;
+    if (G.roundOver || G.turn !== seat || !hasDrawn(seat)) return;
     const tile = findTile(seat, key);
     if (!tile) return;
     if (G.justRiichiDeclared === seat) {
       const rest = G.hands[seat].filter(t => t !== tile);
-      if (!isTenpai13(rest)) return;  // 不正打牌は無視 (ゲスト側でも防止済)
+      if (!isTenpai13(rest, meldTriples(seat))) return;  // 不正打牌は無視 (ゲスト側でも防止済)
     }
     clearTimeout(S.turnTimer);
     discardTile(seat, tile);
@@ -335,9 +339,9 @@ const NetGame = (() => {
     setTimeout(() => { nextTurn(); startTurn(); }, 120);
   }
   function hostApplyRiichi(seat) {
-    if (G.roundOver || G.turn !== seat || G.hands[seat].length !== 14) return;
+    if (G.roundOver || G.turn !== seat || !hasDrawn(seat)) return;
     if (G.isRiichi[seat] || G.scores[seat] < 1000) return;
-    if (!canDeclareRiichi(G.hands[seat])) return;
+    if (!canDeclareRiichi(G.hands[seat], meldTriples(seat))) return;
     G.isRiichi[seat] = true;
     G.riichiTurnsLeft[seat] = 4;
     G.scores[seat] -= 1000;
@@ -350,7 +354,7 @@ const NetGame = (() => {
     armTurnTimeout(seat);  // 宣言牌の打牌待ち
   }
   function hostApplyKita(seat) {
-    if (G.roundOver || G.turn !== seat || G.hands[seat].length !== 14) return;
+    if (G.roundOver || G.turn !== seat || !hasDrawn(seat)) return;
     const drawnIdx = (G.justDrawnAll && G.justDrawnAll[seat] != null) ? G.justDrawnAll[seat] : null;
     const drawn = drawnIdx != null ? G.hands[seat][drawnIdx] : null;
     if (G.isRiichi[seat] && !(drawn && drawn.id === KITA_ID)) return;
@@ -359,33 +363,42 @@ const NetGame = (() => {
       armTurnTimeout(seat);
     }
   }
-  function hostApplyTsumo(seat) {
-    if (G.roundOver || G.turn !== seat || G.hands[seat].length !== 14) return;
+  function hostApplyAnkan(seat, id) {
+    if (G.roundOver || G.turn !== seat || !hasDrawn(seat)) return;
     if (G.justRiichiDeclared === seat) return;
-    if (!isWinning(G.hands[seat])) return;
+    if (!ankanCandidateIds(seat).includes(id)) return;
+    if (doAnkan(seat, id)) {
+      renderAll();
+      armTurnTimeout(seat);
+    }
+  }
+  function hostApplyTsumo(seat) {
+    if (G.roundOver || G.turn !== seat || !hasDrawn(seat)) return;
+    if (G.justRiichiDeclared === seat) return;
+    if (!isWinning(equivHand(seat))) return;
     const drawnIdx = (G.justDrawnAll && G.justDrawnAll[seat] != null) ? G.justDrawnAll[seat] : null;
     const ctx = {
       isTsumo: true, isRiichi: G.isRiichi[seat], isOya: G.oya === seat, seatWind: seatWindOf(seat),
-      doraIndicator: G.doraIndicator, uraIndicator: G.uraIndicator, kitas: G.kitas[seat], round: G.round,
+      doraIndicator: G.doraIndicator, uraIndicator: G.uraIndicator, kanDora: G.kanDoraInd, extraTiles: meldExtraTiles(seat), kitas: G.kitas[seat], round: G.round,
       isDoubleRiichi: G.doubleRiichi[seat], firstDraw: G.rivers[seat].length === 0 && G.kitas[seat] === 0, isHaitei: G.drawTiles.length === 0, isIppatsu: G.riichiTurnsLeft[seat] > 0,
       winTile: drawnIdx != null ? G.hands[seat][drawnIdx] : null,
     };
-    const result = calcYaku(G.hands[seat], ctx);
+    const result = calcYaku(equivHand(seat), ctx);
     if (result.error || (result.han === 0 && !result.isYakuman)) return;
     clearTimeout(S.turnTimer);
     announce('tsumo');
     toast(`${seatDispName(seat)} ツモ!`);
-    showWinModal(seat, G.hands[seat], ctx, result);
+    showWinModal(seat, equivHand(seat), ctx, result);
   }
   function hostApplyRon(seat) {
     if (!S.pendingOffer || S.pendingOffer.seat !== seat || G.roundOver) return;
     const { fromSeat, tile } = S.pendingOffer;
     clearTimeout(S.offerTimer);
     S.pendingOffer = null;
-    const test = [...G.hands[seat], tile];
+    const test = [...G.hands[seat], tile, ...meldTriples(seat)];
     const ctx = {
       isTsumo: false, isRiichi: G.isRiichi[seat], isOya: G.oya === seat, seatWind: seatWindOf(seat),
-      doraIndicator: G.doraIndicator, uraIndicator: G.uraIndicator, kitas: G.kitas[seat], round: G.round,
+      doraIndicator: G.doraIndicator, uraIndicator: G.uraIndicator, kanDora: G.kanDoraInd, extraTiles: meldExtraTiles(seat), kitas: G.kitas[seat], round: G.round,
       isDoubleRiichi: G.doubleRiichi[seat], firstDraw: G.rivers[seat].length === 0 && G.kitas[seat] === 0, isHaitei: G.drawTiles.length === 0, isIppatsu: G.riichiTurnsLeft[seat] > 0, winTile: tile, fromSeat,
     };
     const result = calcYaku(test, ctx);
@@ -465,6 +478,10 @@ const NetGame = (() => {
     G.kitas = rotKeys(pub.kitas, k);
     G.kitaTiles = rotKeys(pub.kitaTiles, k);
     ALL_SEATS.forEach(s => { if (!G.kitaTiles[s]) G.kitaTiles[s] = []; });
+    G.melds = rotKeys(pub.melds, k);
+    ALL_SEATS.forEach(s => { if (!G.melds[s]) G.melds[s] = []; });
+    G.kanDoraInd = pub.kanDora || [];
+    if (pub.rules) G.rules = pub.rules;
     G.isRiichi = rotKeys(pub.isRiichi, k);
     G.riichiTurnsLeft = rotKeys(pub.riichiTurnsLeft, k);
     G.justRiichiDeclared = rotSeat(pub.justRiichiDeclared, k);

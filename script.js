@@ -88,7 +88,32 @@ const G = {
   justDrawnAll: {},
   // 半荘終了フラグ (net対戦でアクション受付を止める)
   gameEnded: false,
+  // 副露 (Stage1: 暗槓のみ / Stage2: ポン・明槓): seat → [{type:'ankan', id, tiles:[4枚]}]
+  melds: { bottom: [], right: [], top: [], left: [] },
+  // カンドラ表示牌 (暗槓ごとに王牌からめくる、 中央+リザルトに表示)
+  kanDoraInd: [],
+  // ルールオプション (URL ?naki=0&tobi=0 で off、 既定 on。 net はホスト設定を pub で配布)
+  rules: { naki: true, tobi: true },
 };
+
+// ─── 副露ヘルパー ─────────────────────────
+// 面子評価は 「槓 = 同一牌3枚を手牌に足す」 等価形で既存ロジックを再利用する
+// (4枚目は meldExtraTiles でドラ/赤ドラ計算にのみ加算)
+function meldTriples(seat) {
+  const out = [];
+  for (const m of (G.melds[seat] || [])) out.push(...m.tiles.slice(0, 3));
+  return out;
+}
+function equivHand(seat, tiles) {
+  return (tiles || G.hands[seat]).concat(meldTriples(seat));
+}
+function meldExtraTiles(seat) {
+  const out = [];
+  for (const m of (G.melds[seat] || [])) if (m.tiles.length === 4) out.push(m.tiles[3]);
+  return out;
+}
+function handFullCount(seat) { return 14 - 3 * (G.melds[seat] || []).length; }
+function hasDrawn(seat) { return G.hands[seat].length === handFullCount(seat); }
 
 // net対戦層 (netgame.js) が読み込まれていれば返す (未読込は null)
 function NETQ() { return (typeof NetGame !== 'undefined') ? NetGame : null; }
@@ -681,7 +706,7 @@ const YAKU_DISPLAY_ORDER = [
   'ピンフ', 'タンヤオ', '一盃口',
   '白', '發', '中', '場風 東', '場風 南', '自風 東', '自風 南', '自風 西',
   '七対子', '対々和', '三暗刻', '三色同刻', '一気通貫', '二盃口', 'チャンタ', 'ジュンチャン', '混老頭', '小三元', '混一色', '清一色',
-  'ドラ', '赤ドラ', '裏ドラ', '北抜き',
+  'ドラ', '赤ドラ', 'カンドラ', '裏ドラ', '北抜き',
 ];
 function yakuOrderIdx(name) {
   const i = YAKU_DISPLAY_ORDER.findIndex(o => name === o || name.startsWith(o));
@@ -690,7 +715,9 @@ function yakuOrderIdx(name) {
 
 // ─── 役判定 メイン ─────────────────────────
 function calcYaku(hand, context) {
-  // context: { isTsumo, isRiichi, isOya, doraIndicator, kitas, round }
+  // context: { isTsumo, isRiichi, isOya, doraIndicator, kitas, round, extraTiles, kanDora, ... }
+  // hand = 面子評価用 (槓は3枚等価済)。 ドラ/赤ドラ系のみ 槓の4枚目 (extraTiles) を加えて数える
+  const scanHand = (context.extraTiles && context.extraTiles.length) ? hand.concat(context.extraTiles) : hand;
   const yakuList = [];
   let han = 0;
   let isYakuman = false;
@@ -765,14 +792,20 @@ function calcYaku(hand, context) {
     else { yakuList.push({ name: '河底撈魚', han: 1 }); han += 1; }
   }
 
-  // ドラ計算 (表ドラ + 赤ドラ + 北ドラ)
-  const doraCount = countDora(hand, context.doraIndicator);
+  // ドラ計算 (表ドラ + 赤ドラ + カンドラ + 北ドラ)
+  const doraCount = countDora(scanHand, context.doraIndicator);
   if (doraCount > 0) { yakuList.push({ name: 'ドラ', han: doraCount }); han += doraCount; }
-  const akaCount = hand.filter(t => t.isRed).length;
+  const akaCount = scanHand.filter(t => t.isRed).length;
   if (akaCount > 0) { yakuList.push({ name: '赤ドラ', han: akaCount }); han += akaCount; }
+  // カンドラ (暗槓ごとに1枚めくる、 全員に有効)
+  if (context.kanDora && context.kanDora.length > 0) {
+    let kd = 0;
+    for (const ind of context.kanDora) kd += countDora(scanHand, ind);
+    if (kd > 0) { yakuList.push({ name: 'カンドラ', han: kd }); han += kd; }
+  }
   // 裏ドラ (リーチ和了時のみ、 王牌のドラ表示牌の下段をめくる)
   if (context.isRiichi && context.uraIndicator) {
-    const uraCount = countDora(hand, context.uraIndicator);
+    const uraCount = countDora(scanHand, context.uraIndicator);
     if (uraCount > 0) { yakuList.push({ name: '裏ドラ', han: uraCount }); han += uraCount; }
   }
   if (context.kitas > 0) { yakuList.push({ name: `北抜き×${context.kitas}`, han: context.kitas }); han += context.kitas; }
@@ -782,7 +815,8 @@ function calcYaku(hand, context) {
 
   // 役なし? (役牌・タンヤオ等 1翻役以上が必要、 ドラ・北だけでは役なし)
   // ただし簡略化: 1翻以上あれば OK とする
-  const yakuOnly = yakuList.filter(y => !y.name.startsWith('ドラ') && !y.name.startsWith('赤ドラ') && !y.name.startsWith('北抜き'));
+  const yakuOnly = yakuList.filter(y =>
+    !['ドラ', '赤ドラ', 'カンドラ', '裏ドラ', '北抜き'].some(p => y.name.startsWith(p)));
   if (yakuOnly.length === 0) {
     return { yakuList, han, isYakuman: false, error: '役なし (ドラ・北抜きだけではあがれません)' };
   }
@@ -843,7 +877,7 @@ function renderHand(seat) {
     const keepSet = new Set();
     if (declaring) {
       G.hands.bottom.forEach(t => {
-        if (isTenpai13(G.hands.bottom.filter(x => x !== t))) keepSet.add(t);
+        if (isTenpai13(G.hands.bottom.filter(x => x !== t), meldTriples('bottom'))) keepSet.add(t);
       });
     }
     const decorate = (el, tile) => {
@@ -864,6 +898,20 @@ function renderHand(seat) {
       const el = createTileEl(drawnTile, { mine: true, justDrawn: true });
       decorate(el, drawnTile);
       container.appendChild(el);
+    }
+    // 副露 (暗槓): 手牌右端にグループ表示
+    if (G.melds.bottom.length > 0) {
+      const msep = document.createElement('span');
+      msep.style.cssText = 'width:14px;display:inline-block;';
+      container.appendChild(msep);
+      G.melds.bottom.forEach(m => {
+        m.tiles.forEach(mt => {
+          const el = createTileEl(mt, { small: true });
+          el.classList.add('tile--meld');
+          el.title = '暗槓';
+          container.appendChild(el);
+        });
+      });
     }
     // 抜いた北: 手牌の右端に 少し間隔を空けて 並べる
     if (G.kitaTiles.bottom.length > 0) {
@@ -896,9 +944,18 @@ function renderHand(seat) {
       el.title = '北抜き (+1翻)';
       return el;
     });
+    const meldEls = [];
+    (G.melds[seat] || []).forEach(m => {
+      m.tiles.forEach(mt => {
+        const el = createTileEl(mt, { small: true });
+        el.classList.add('tile--meld');
+        el.title = '暗槓';
+        meldEls.push(el);
+      });
+    });
     const ordered = (seat === 'top' || seat === 'right')
-      ? [...kitaEls, ...handEls]
-      : [...handEls, ...kitaEls];
+      ? [...meldEls, ...kitaEls, ...handEls]
+      : [...handEls, ...kitaEls, ...meldEls];
     ordered.forEach(e => container.appendChild(e));
   }
 }
@@ -1059,6 +1116,14 @@ function renderSeats() {
     // 手番の家をハイライト
     labelEl.classList.toggle('seat__label--turn', G.turn === seat && !G.roundOver);
   });
+  // 中央: カンドラ表示 (暗槓が出たら以降ずっと見える)
+  const kd = document.getElementById('center-kandora');
+  if (kd) {
+    if (G.kanDoraInd.length > 0) {
+      kd.hidden = false;
+      kd.innerHTML = 'カンドラ ' + G.kanDoraInd.map(t => tileSpanHtml(t, 'width:14px; height:19px; vertical-align:middle;')).join('');
+    } else { kd.hidden = true; kd.innerHTML = ''; }
+  }
 }
 
 // ─── 全描画 ─────────────────────────────────
@@ -1093,12 +1158,12 @@ function updateHint() {
     hint.classList.add('game__hint--cpu');
     return;
   }
-  if (G.hands.bottom.length === 14) {
+  if (hasDrawn('bottom')) {
     const hasKita = G.hands.bottom.some(t => t.id === KITA_ID);
     if (G.selected) {
       // 待ち牌プレビュー: 選択牌を切った後の形を先読み表示 (初心者ガイドの核)
       const rest = G.hands.bottom.filter(t => t !== G.selected);
-      const waits = waitingIds(rest);
+      const waits = waitingIds(rest, meldTriples('bottom'));
       const selName = `${TILE_NAMES[G.selected.id]}${G.selected.isRed ? '(赤)' : ''}`;
       if (waits.length > 0) {
         const furiten = G.rivers.bottom.some(t => waits.includes(t.id));
@@ -1117,8 +1182,8 @@ function updateHint() {
     } else {
       hint.textContent = '👆 手牌から捨てる牌をタップ → 「打牌」 (ダブルクリックで即打牌)';
     }
-  } else if (G.hands.bottom.length === 13) {
-    const waits = waitingIds(G.hands.bottom);
+  } else if (G.hands.bottom.length === handFullCount('bottom') - 1) {
+    const waits = waitingIds(G.hands.bottom, meldTriples('bottom'));
     if (waits.length > 0) {
       const furiten = G.rivers.bottom.some(t => waits.includes(t.id)) || G.passFuriten || G.tempFuriten;
       hint.textContent = `🎯 テンパイ中! 待ち: ${waitsLabel(waits)}${furiten ? ' ⚠️フリテン(ロン不可)' : ''}`;
@@ -1183,10 +1248,10 @@ function renderRiichiGuide() {
 
   // ① リーチ宣言中 (宣言牌を選んでいる最中): 選択中の候補牌で あがり牌をプレビュー
   if (G.justRiichiDeclared === 'bottom') {
-    const keepers = G.hands.bottom.filter(t => isTenpai13(G.hands.bottom.filter(x => x !== t)));
+    const keepers = G.hands.bottom.filter(t => isTenpai13(G.hands.bottom.filter(x => x !== t), meldTriples('bottom')));
     if (keepers.length === 0) { el.hidden = true; return; }
     const target = (G.selected && keepers.includes(G.selected)) ? G.selected : keepers[0];
-    const waits = waitingIds(G.hands.bottom.filter(t => t !== target));
+    const waits = waitingIds(G.hands.bottom.filter(t => t !== target), meldTriples('bottom'));
     if (waits.length === 0) { el.hidden = true; return; }
     const multi = keepers.length > 1 ? ' (光る牌タップで切替)' : '';
     build(`🔴${TILE_NAMES[target.id]}を切ると → あがり牌:`, waits, true);
@@ -1201,11 +1266,11 @@ function renderRiichiGuide() {
 
   // ② リーチ成立後: 確定した待ちを常時表示
   // 14枚時 (ツモ直後の自動処理中) は ツモ牌を除いた 13枚で待ちを計算
-  const base = (G.hands.bottom.length === 14 && G.justDrawn != null)
+  const base = (hasDrawn('bottom') && G.justDrawn != null)
     ? G.hands.bottom.filter((_, i) => i !== G.justDrawn)
     : G.hands.bottom;
   if (base.length !== 13) { el.hidden = true; return; }
-  const waits = waitingIds(base);
+  const waits = waitingIds(base, meldTriples('bottom'));
   if (waits.length === 0) { el.hidden = true; return; }
   build('🔴リーチ中 — あがり牌:', waits, true);
 }
@@ -1213,7 +1278,7 @@ function renderRiichiGuide() {
 // ─── アクションボタン ─────────────────────────
 function updateActionButtons() {
   const myTurn = (G.turn === 'bottom' && !G.busy);
-  const has14 = (G.hands.bottom.length === 14);
+  const has14 = hasDrawn('bottom');
   document.getElementById('btn-discard').disabled = !(myTurn && has14 && G.selected);
   // 北抜き: 通常は 手牌に北があれば可、 リーチ後は 「ツモった牌が北」 の時のみ
   const drawnTile = (G.justDrawn != null) ? G.hands.bottom[G.justDrawn] : null;
@@ -1221,14 +1286,17 @@ function updateActionButtons() {
   const kitaOk = (G.kingTiles.length > 0)
     && (G.isRiichi.bottom ? (drawnTile && drawnTile.id === KITA_ID) : hasKita);
   document.getElementById('btn-kita').disabled = !(myTurn && has14 && kitaOk);
+  // 暗槓: 自分の番 + ツモ済 + 同一牌4枚 + 王牌残2以上 (リーチ中は不可)
+  const kanBtn = document.getElementById('btn-kan');
+  if (kanBtn) kanBtn.disabled = !(myTurn && has14 && G.justRiichiDeclared !== 'bottom' && ankanCandidateIds('bottom').length > 0);
   // ツモ判定: 14牌でかつ あがり形 + 役あり (ドラ・北だけはNG)
   // ※ リーチ宣言直後 (宣言牌を捨てる前) は ツモ不可 (宣言牌を捨ててリーチ成立が先)
   let canTsumo = false;
   if (myTurn && has14 && G.justRiichiDeclared !== 'bottom') {
-    if (isWinning(G.hands.bottom)) {
-      const result = calcYaku(G.hands.bottom, {
+    if (isWinning(equivHand('bottom'))) {
+      const result = calcYaku(equivHand('bottom'), {
         isTsumo: true, isRiichi: G.isRiichi.bottom, isOya: G.oya === 'bottom', seatWind: seatWindOf('bottom'),
-        doraIndicator: G.doraIndicator, uraIndicator: G.uraIndicator, kitas: G.kitas.bottom, round: G.round,
+        doraIndicator: G.doraIndicator, uraIndicator: G.uraIndicator, kanDora: G.kanDoraInd, extraTiles: meldExtraTiles('bottom'), kitas: G.kitas.bottom, round: G.round,
         isDoubleRiichi: G.doubleRiichi.bottom, firstDraw: G.rivers.bottom.length === 0 && G.kitas.bottom === 0, isHaitei: G.drawTiles.length === 0, isIppatsu: G.riichiTurnsLeft.bottom > 0, winTile: drawnTile,
       });
       canTsumo = !result.error && (result.han > 0 || result.isYakuman);
@@ -1252,7 +1320,7 @@ function updateActionButtons() {
       riichiBtn.textContent = 'リーチ';
       let canRiichi = false;
       if (myTurn && has14 && !G.isRiichi.bottom && G.scores.bottom >= 1000) {
-        canRiichi = canDeclareRiichi(G.hands.bottom);
+        canRiichi = canDeclareRiichi(G.hands.bottom, meldTriples('bottom'));
       }
       riichiBtn.disabled = !canRiichi;
     }
@@ -1337,35 +1405,35 @@ function shantenOf(hand) {
 }
 
 // ─── テンパイ判定 (1枚捨てたら 13牌が 聴牌か) ─────
-function isTenpai13(hand13) {
-  // 13牌で 1枚加えたら あがり形になる id があるか
+function isTenpai13(hand13, melds = []) {
+  // 13牌相当 (手牌 + 副露3枚等価) で 1枚加えたら あがり形になる id があるか
   for (let id = 0; id < 27; id++) {
-    const test = [...hand13, { id, copy: 0, isRed: false }];
+    const test = [...hand13, ...melds, { id, copy: 0, isRed: false }];
     if (isWinning(test)) return true;
   }
   return false;
 }
-function canDeclareRiichi(hand14) {
-  // 14牌から 1枚捨てて 13牌が聴牌になるか (どれを捨てても良い、 1枚でもあれば true)
+function canDeclareRiichi(hand14, melds = []) {
+  // 14牌相当から 手牌1枚を捨てて 聴牌になるか (副露牌は捨てられない)
   for (let i = 0; i < hand14.length; i++) {
     const tmp = hand14.slice(0, i).concat(hand14.slice(i + 1));
-    if (isTenpai13(tmp)) return true;
+    if (isTenpai13(tmp, melds)) return true;
   }
   return false;
 }
 
-// ─── 待ち牌 (13牌のテンパイ形が あがれる牌 id 一覧) ──
-function waitingIds(hand13) {
+// ─── 待ち牌 (13牌相当のテンパイ形が あがれる牌 id 一覧) ──
+function waitingIds(hand13, melds = []) {
   const waits = [];
   for (let id = 0; id < 27; id++) {
-    if (isWinning([...hand13, { id, copy: 0, isRed: false }])) waits.push(id);
+    if (isWinning([...hand13, ...melds, { id, copy: 0, isRed: false }])) waits.push(id);
   }
   return waits;
 }
 
 // ─── フリテン判定 (自分の河に 待ち牌が 1枚でもあれば ロン不可) ──
 function isFuriten(seat) {
-  const waits = waitingIds(G.hands[seat]);
+  const waits = waitingIds(G.hands[seat], meldTriples(seat));
   if (waits.length === 0) return false;
   return G.rivers[seat].some(t => waits.includes(t.id));
 }
@@ -1373,15 +1441,15 @@ function isFuriten(seat) {
 // ─── ロン判定 (任意の家、 fromSeat の打牌に対して) ──
 function checkRonForSeat(seat, fromSeat, tile) {
   if (seat === G.emptySeat || seat === fromSeat) return null;
-  if (G.hands[seat].length !== 13) return null;
-  const test = [...G.hands[seat], tile];
+  if (G.hands[seat].length !== handFullCount(seat) - 1) return null;
+  const test = [...G.hands[seat], tile, ...meldTriples(seat)];
   if (!isWinning(test)) return null;
   // フリテン: 自河に待ち牌 / 見逃しフリテン (自家のみ)
   if (isFuriten(seat)) return null;
   if (seat === 'bottom' && (G.passFuriten || G.tempFuriten)) return null;
   const ctx = {
     isTsumo: false, isRiichi: G.isRiichi[seat], isOya: G.oya === seat, seatWind: seatWindOf(seat),
-    doraIndicator: G.doraIndicator, uraIndicator: G.uraIndicator, kitas: G.kitas[seat], round: G.round,
+    doraIndicator: G.doraIndicator, uraIndicator: G.uraIndicator, kanDora: G.kanDoraInd, extraTiles: meldExtraTiles(seat), kitas: G.kitas[seat], round: G.round,
     isDoubleRiichi: G.doubleRiichi[seat], firstDraw: G.rivers[seat].length === 0 && G.kitas[seat] === 0, isHaitei: G.drawTiles.length === 0, isIppatsu: G.riichiTurnsLeft[seat] > 0,
     winTile: tile, fromSeat,
   };
@@ -1393,7 +1461,7 @@ function checkRonForSeat(seat, fromSeat, tile) {
 
 function onMyHandClick(tile) {
   if (G.turn !== 'bottom' || G.busy) return;
-  if (G.hands.bottom.length !== 14) return;
+  if (!hasDrawn('bottom')) return;
   // リーチ後 (宣言牌すでに捨てた状態) は 手牌操作禁止
   // ※ リーチ宣言直後 (= G.justRiichiDeclared === 'bottom') は 1枚捨てるまで 操作OK
   if (G.isRiichi.bottom && G.justRiichiDeclared !== 'bottom') {
@@ -1410,7 +1478,7 @@ function onMyHandClick(tile) {
 // ダブルクリック = 選択 + 即打牌 (PC向けショートカット。 打牌可否のガードは 打牌ボタン handler に集約)
 function onMyHandDblClick(tile) {
   if (G.turn !== 'bottom' || G.busy || G.roundOver) return;
-  if (G.hands.bottom.length !== 14) return;
+  if (!hasDrawn('bottom')) return;
   if (G.isRiichi.bottom && G.justRiichiDeclared !== 'bottom') return;
   G.selected = tile;
   updateActionButtons();  // disabled のままだと click() が発火しないため 先に反映
@@ -1500,6 +1568,33 @@ function kitaNuki(seat) {
   return true;
 }
 
+// ─── 暗槓 (常時ルール): 手牌の同一牌4枚 → 槓子 + カンドラめくり + 嶺上補充 ──
+// 王牌残2枚以上が条件 (カンドラ1 + 嶺上1)。 リーチ中は不可 (簡略、 待ち変化防止)
+function ankanCandidateIds(seat) {
+  if (G.isRiichi[seat]) return [];
+  if (G.kingTiles.length < 2) return [];
+  const counts = countTiles(G.hands[seat]);
+  return Object.keys(counts).map(Number).filter(id => counts[id] === 4 && id !== KITA_ID);
+}
+function doAnkan(seat, id) {
+  const tiles = G.hands[seat].filter(t => t.id === id);
+  if (tiles.length !== 4 || G.kingTiles.length < 2 || G.isRiichi[seat]) return false;
+  G.hands[seat] = G.hands[seat].filter(t => t.id !== id);
+  G.melds[seat].push({ type: 'ankan', id, tiles });
+  // カンドラ: 王牌の反対端 (カットから遠い側) からめくる — 以降全員に有効
+  G.kanDoraInd.push(G.kingTiles.shift());
+  // 嶺上 (カット側末尾) から補充
+  const replacement = G.kingTiles.pop();
+  G.hands[seat].push(replacement);
+  G.justDrawnAll[seat] = G.hands[seat].length - 1;
+  if (seat === 'bottom') G.justDrawn = G.hands[seat].length - 1;
+  if (seat === 'bottom') G.selected = null;
+  playSE('riichi');
+  announce('kan');
+  toast(`${seatLabel(seat)} 暗槓! カンドラが1枚増えました`);
+  return true;
+}
+
 // ─── ターン進行 (反時計回り、 空席をスキップ) ──
 function nextTurn() {
   const ccw = ccwFrom(G.turn);
@@ -1521,7 +1616,7 @@ function startTurn() {
     renderAll();
     // リーチ後 自家: 北なら自動北抜き → ツモあがり可能なら ツモボタン待ち → それ以外は 自動ツモ切り
     // ※ リーチ宣言直後 (= まだ宣言牌を捨てていない) は スキップ (ユーザーが自分で1枚選んで捨てる)
-    if (G.isRiichi.bottom && G.hands.bottom.length === 14 && G.justRiichiDeclared !== 'bottom') {
+    if (G.isRiichi.bottom && hasDrawn('bottom') && G.justRiichiDeclared !== 'bottom') {
       handleRiichiAutoBottom();
     }
   } else if (NETQ() && NETQ().isRemoteSeat(G.turn)) {
@@ -1554,10 +1649,10 @@ function handleRiichiAutoBottom() {
     return;
   }
   let canTsumoNow = false;
-  if (isWinning(G.hands.bottom)) {
-    const result = calcYaku(G.hands.bottom, {
+  if (isWinning(equivHand('bottom'))) {
+    const result = calcYaku(equivHand('bottom'), {
       isTsumo: true, isRiichi: true, isOya: G.oya === 'bottom', seatWind: seatWindOf('bottom'),
-      doraIndicator: G.doraIndicator, uraIndicator: G.uraIndicator, kitas: G.kitas.bottom, round: G.round,
+      doraIndicator: G.doraIndicator, uraIndicator: G.uraIndicator, kanDora: G.kanDoraInd, extraTiles: meldExtraTiles('bottom'), kitas: G.kitas.bottom, round: G.round,
       isDoubleRiichi: G.doubleRiichi.bottom, firstDraw: G.rivers.bottom.length === 0 && G.kitas.bottom === 0, isHaitei: G.drawTiles.length === 0, isIppatsu: G.riichiTurnsLeft.bottom > 0, winTile: drawnTile,
     });
     canTsumoNow = !result.error && (result.han > 0 || result.isYakuman);
@@ -1594,10 +1689,18 @@ function cpuPlay(seat) {
     setTimeout(() => cpuDiscard(seat, true), 300);
     return;
   }
+  // 暗槓 (同一牌4枚、 王牌残2以上、 80%): カンドラ+嶺上補充してから 以降の判断へ
+  if (!G.isRiichi[seat]) {
+    const kanIds = ankanCandidateIds(seat);
+    if (kanIds.length > 0 && Math.random() > 0.2) {
+      doAnkan(seat, kanIds[0]);
+      renderAll();
+    }
+  }
   // 未リーチ → リーチ判定 (14牌、 1000点以上、 テンパイ、 70%確率)
   // ※ 既にあがり形なら リーチせず そのままツモ (cpuDiscard 側で処理) — 宣言直後ツモの不正防止
-  if (G.hands[seat].length === 14 && G.scores[seat] >= 1000
-      && !isWinning(G.hands[seat]) && canDeclareRiichi(G.hands[seat])) {
+  if (hasDrawn(seat) && G.scores[seat] >= 1000
+      && !isWinning(equivHand(seat)) && canDeclareRiichi(G.hands[seat], meldTriples(seat))) {
     if (Math.random() > 0.3) {
       G.isRiichi[seat] = true;
       G.riichiTurnsLeft[seat] = 4;
@@ -1624,14 +1727,14 @@ function cpuPlay(seat) {
 function cpuDiscard(seat, forceTsumoTile = false) {
   if (G.roundOver) return;
   // CPU が ツモあがり 可能か (役なしはあがれない)
-  if (G.hands[seat].length === 14 && isWinning(G.hands[seat])) {
+  if (hasDrawn(seat) && isWinning(equivHand(seat))) {
     const drawn = G.hands[seat][G.hands[seat].length - 1];
     const ctx = {
       isTsumo: true, isRiichi: G.isRiichi[seat], isOya: G.oya === seat, seatWind: seatWindOf(seat),
-      doraIndicator: G.doraIndicator, uraIndicator: G.uraIndicator, kitas: G.kitas[seat], round: G.round,
+      doraIndicator: G.doraIndicator, uraIndicator: G.uraIndicator, kanDora: G.kanDoraInd, extraTiles: meldExtraTiles(seat), kitas: G.kitas[seat], round: G.round,
       isDoubleRiichi: G.doubleRiichi[seat], firstDraw: G.rivers[seat].length === 0 && G.kitas[seat] === 0, isHaitei: G.drawTiles.length === 0, isIppatsu: G.riichiTurnsLeft[seat] > 0, winTile: drawn,
     };
-    const result = calcYaku(G.hands[seat], ctx);
+    const result = calcYaku(equivHand(seat), ctx);
     if (!result.error && (result.han > 0 || result.isYakuman)) {
       announce('tsumo');
       toast(`${seatLabel(seat)} ツモ!`);
@@ -1655,7 +1758,7 @@ function cpuDiscard(seat, forceTsumoTile = false) {
   // 通常打牌: リーチ宣言ターンは 「捨ててもテンパイが維持される牌」 に限定
   let pool = G.hands[seat];
   if (G.justRiichiDeclared === seat) {
-    const keep = pool.filter(t => isTenpai13(G.hands[seat].filter(x => x !== t)));
+    const keep = pool.filter(t => isTenpai13(G.hands[seat].filter(x => x !== t), meldTriples(seat)));
     if (keep.length > 0) pool = keep;
   }
   // シャンテン数が最小になる捨て牌を選ぶ (= 手が進む打牌)。
@@ -1699,12 +1802,12 @@ function endRound(reason) {
     for (const seat of ALL_SEATS) {
       if (seat === G.emptySeat) continue;
       const h = G.hands[seat];
-      if (h.length === 13 && isTenpai13(h)) tenpaiSeats.push(seat);
-      else if (h.length === 14) {
+      if (h.length === handFullCount(seat) - 1 && isTenpai13(h, meldTriples(seat))) tenpaiSeats.push(seat);
+      else if (h.length === handFullCount(seat)) {
         // 自家14牌 → 1枚捨てた 13牌で テンパイ判定
         const tmp13s = [];
         for (let i = 0; i < 14; i++) tmp13s.push(h.slice(0, i).concat(h.slice(i + 1)));
-        if (tmp13s.some(t => isTenpai13(t))) tenpaiSeats.push(seat);
+        if (tmp13s.some(t => isTenpai13(t, meldTriples(seat)))) tenpaiSeats.push(seat);
       }
     }
     // 点棒移動 (テンパイ料: 計3000点 = ノーテン家 → テンパイ家)
@@ -1844,12 +1947,14 @@ function showWinModal(seat, hand, context, result) {
   const tileSpan = tileSpanHtml;
   let handHtml = '<div style="background:rgba(0,0,0,0.35); padding:8px 6px 4px; border-radius:6px; margin:6px 0; text-align:center; line-height:1;">';
   const winTile = context.winTile;
+  const meldSet = new Set(meldTriples(seat));
+  const handDisp = hand.filter(t => !meldSet.has(t));
   const restTiles = winTile ? (() => {
-    const rest = [...hand];
+    const rest = [...handDisp];
     const wi = rest.indexOf(winTile);
     if (wi >= 0) rest.splice(wi, 1);
     return rest;
-  })() : hand;
+  })() : handDisp;
   handHtml += sortHand(restTiles).map(t => tileSpan(t)).join('');
   if (winTile) {
     handHtml += '<span style="display:inline-block; width:8px;"></span>';
@@ -1859,6 +1964,13 @@ function showWinModal(seat, hand, context, result) {
   if (G.kitaTiles[seat] && G.kitaTiles[seat].length > 0) {
     handHtml += '<span style="display:inline-block; width:10px;"></span>';
     handHtml += G.kitaTiles[seat].map(t => tileSpan(t, 'width:20px; height:27px; opacity:0.85;')).join('');
+  }
+  if (G.melds[seat] && G.melds[seat].length > 0) {
+    handHtml += '<span style="display:inline-block; width:10px;"></span>';
+    G.melds[seat].forEach(m => {
+      handHtml += m.tiles.map(t => tileSpan(t, 'width:20px; height:27px; box-shadow:0 0 0 1px #66bb6a;')).join('');
+      handHtml += '<span style="display:inline-block; width:6px;"></span>';
+    });
   }
   handHtml += `<div style="font-size:9px; color:#aac; margin-top:3px;">${winTile ? `右端が${winType}あがり牌` : ''}${G.kitaTiles[seat] && G.kitaTiles[seat].length > 0 ? ' / 小さい北=北抜き' : ''}</div>`;
   handHtml += '</div>';
@@ -1889,6 +2001,9 @@ function showWinModal(seat, hand, context, result) {
   let doraHtml = '<div style="background:rgba(0,0,0,0.25); padding:6px 8px; border-radius:6px; margin:6px 0; font-size:11px; text-align:left;">';
   if (G.doraIndicator) {
     doraHtml += `<b style="color:#4fc3f7;">ドラ表示牌:</b> ${tinyTile(G.doraIndicator)} <small style="color:#aac;">→ ドラは「${TILE_NAMES[nextTileId(G.doraIndicator.id)]}」</small>`;
+  }
+  if (G.kanDoraInd.length > 0) {
+    doraHtml += `<br><b style="color:#81c784;">カンドラ表示牌:</b> ${G.kanDoraInd.map(t => tinyTile(t)).join('')} <small style="color:#aac;">→ ${G.kanDoraInd.map(t => `「${TILE_NAMES[nextTileId(t.id)]}」`).join(' ')} もドラ扱い</small>`;
   }
   if (context.isRiichi && G.uraIndicator) {
     doraHtml += `<br><b style="color:#ce93d8;">裏ドラ表示牌:</b> ${tinyTile(G.uraIndicator)} <small style="color:#aac;">→ 裏ドラは「${TILE_NAMES[nextTileId(G.uraIndicator.id)]}」 (リーチしていたので公開)</small>`;
@@ -1985,6 +2100,19 @@ function showWinModal(seat, hand, context, result) {
 const ROUND_ORDER = ['東1', '東2', '東3', '南1', '南2', '南3'];
 function nextRound() {
   if (G.type === 'single') { location.href = 'index.html'; return; }
+  // トビ終了 (オプション): 誰かの持ち点が0点未満なら半荘打ち切り
+  const playingT = ALL_SEATS.filter(s => s !== G.emptySeat);
+  if (G.rules && G.rules.tobi && playingT.some(s => G.scores[s] < 0)) {
+    document.getElementById('end-title').textContent = '半荘終了 (トビ)';
+    const rankedT = [...playingT].sort((a, b) => G.scores[b] - G.scores[a]);
+    document.getElementById('end-text').innerHTML
+      = `${rankedT.filter(s => G.scores[s] < 0).map(s => seatShareLabel(s)).join('・')} の持ち点がマイナスになったため終了です。<br>最終スコア:<br>${rankedT.map((s, i) => `${i + 1}位 ${seatShareLabel(s)} = ${G.scores[s].toLocaleString()}点`).join('<br>')}`;
+    const nextBtnT = document.getElementById('end-next');
+    if (nextBtnT) nextBtnT.style.display = 'none';
+    document.getElementById('end-overlay').hidden = false;
+    if (NETQ()) NETQ().onGameEnd(document.getElementById('end-title').textContent, document.getElementById('end-text').innerHTML);
+    return;
+  }
   // 親連荘判定: 親あがり or 流局時親テンパイ → 局を進めず 連荘 (本場は 終了処理側で更新済)
   // 親流れ → 局進行 + 親を反時計回り次家に
   const continuingDealer = (G.lastResult === 'oyaWin' || G.lastResult === 'tenpaiOya');
@@ -2068,6 +2196,8 @@ function startNewRound() {
   G.isRiichi = { bottom: false, right: false, top: false, left: false };
   G.doubleRiichi = { bottom: false, right: false, top: false, left: false };
   G.riichiTurnsLeft = { bottom: 0, right: 0, top: 0, left: 0 };
+  G.melds = { bottom: [], right: [], top: [], left: [] };
+  G.kanDoraInd = [];
   G.pendingRon = null;
   G.justRiichiDeclared = null;
   G.roundOver = false;
@@ -2321,6 +2451,7 @@ const CALLOUT_DEFS = {
   ron:    { text: 'ロン!',   color: 'rgba(198,40,40,0.94)' },
   tsumo:  { text: 'ツモ!',   color: 'rgba(175,124,10,0.94)' },
   kita:   { text: '北抜き',  color: 'rgba(21,101,192,0.92)' },
+  kan:    { text: 'カン!',   color: 'rgba(46,125,50,0.94)' },
 };
 let _calloutTimer = null;
 function showCallout(kind) {
@@ -2457,6 +2588,8 @@ if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator
 // ─── ゲーム初期化 ─────────────────────────
 function initGame() {
   const params = new URLSearchParams(location.search);
+  // ルールオプション (既定 on。 net はホストのURL設定が pub で全員に配布される)
+  G.rules = { naki: params.get('naki') !== '0', tobi: params.get('tobi') !== '0' };
   // net対戦 (?net=host / ?net=join&room=1234): netgame.js に委譲
   const netMode = params.get('net');
   if (netMode && NETQ()) {
@@ -2510,7 +2643,7 @@ if (document.getElementById('table')) {
       // リーチ宣言直後: テンパイが崩れる牌は 捨てられない
       if (G.justRiichiDeclared === 'bottom') {
         const rest = G.hands.bottom.filter(t => t !== tile);
-        if (!isTenpai13(rest)) {
+        if (!isTenpai13(rest, meldTriples('bottom'))) {
           toast('リーチ中は テンパイが崩れる牌は 捨てられません');
           return;
         }
@@ -2526,7 +2659,7 @@ if (document.getElementById('table')) {
     });
     document.getElementById('btn-kita')?.addEventListener('click', () => {
       if (G.turn !== 'bottom' || G.busy || G.roundOver) return;
-      if (G.hands.bottom.length !== 14) return;
+      if (!hasDrawn('bottom')) return;
       // リーチ後は ツモった牌が北の時のみ (updateActionButtons と同条件)
       const drawnTile = (G.justDrawn != null) ? G.hands.bottom[G.justDrawn] : null;
       if (G.isRiichi.bottom && !(drawnTile && drawnTile.id === KITA_ID)) return;
@@ -2534,13 +2667,25 @@ if (document.getElementById('table')) {
       kitaNuki('bottom');
       renderAll();
     });
+    document.getElementById('btn-kan')?.addEventListener('click', () => {
+      if (G.turn !== 'bottom' || G.busy || G.roundOver) return;
+      if (!hasDrawn('bottom') || G.justRiichiDeclared === 'bottom') return;
+      const ids = ankanCandidateIds('bottom');
+      if (ids.length === 0) return;
+      // ツモ牌で4枚目が揃った牌を優先
+      const drawnTile = (G.justDrawn != null) ? G.hands.bottom[G.justDrawn] : null;
+      const id = (drawnTile && ids.includes(drawnTile.id)) ? drawnTile.id : ids[0];
+      if (NETQ() && NETQ().isGuest()) { NETQ().guestAction('ankan', { id }); return; }
+      doAnkan('bottom', id);
+      renderAll();
+    });
     document.getElementById('btn-tsumo')?.addEventListener('click', () => {
       if (G.turn !== 'bottom' || G.busy || G.roundOver) return;
       if (G.justRiichiDeclared === 'bottom') return;  // 宣言牌を捨てる前はツモ不可
-      if (G.hands.bottom.length !== 14 || !isWinning(G.hands.bottom)) return;
+      if (!hasDrawn('bottom') || !isWinning(equivHand('bottom'))) return;
       const drawnTile = (G.justDrawn != null) ? G.hands.bottom[G.justDrawn] : null;
       const ctx = { isTsumo: true, isRiichi: G.isRiichi.bottom, isOya: G.oya === 'bottom', seatWind: seatWindOf('bottom'),
-                    doraIndicator: G.doraIndicator, uraIndicator: G.uraIndicator, kitas: G.kitas.bottom, round: G.round,
+                    doraIndicator: G.doraIndicator, uraIndicator: G.uraIndicator, kanDora: G.kanDoraInd, extraTiles: meldExtraTiles('bottom'), kitas: G.kitas.bottom, round: G.round,
                     isDoubleRiichi: G.doubleRiichi.bottom, firstDraw: G.rivers.bottom.length === 0 && G.kitas.bottom === 0, isHaitei: G.drawTiles.length === 0, isIppatsu: G.riichiTurnsLeft.bottom > 0, winTile: drawnTile };
       const result = calcYaku(G.hands.bottom, ctx);
       if (result.error) { toast(result.error); return; }
@@ -2554,7 +2699,7 @@ if (document.getElementById('table')) {
       const { tile, fromSeat } = G.pendingRon;
       const test = [...G.hands.bottom, tile];
       const ctx = { isTsumo: false, isRiichi: G.isRiichi.bottom, isOya: G.oya === 'bottom', seatWind: seatWindOf('bottom'),
-                    doraIndicator: G.doraIndicator, uraIndicator: G.uraIndicator, kitas: G.kitas.bottom, round: G.round,
+                    doraIndicator: G.doraIndicator, uraIndicator: G.uraIndicator, kanDora: G.kanDoraInd, extraTiles: meldExtraTiles('bottom'), kitas: G.kitas.bottom, round: G.round,
                     isDoubleRiichi: G.doubleRiichi.bottom, firstDraw: G.rivers.bottom.length === 0 && G.kitas.bottom === 0, isHaitei: G.drawTiles.length === 0, isIppatsu: G.riichiTurnsLeft.bottom > 0, winTile: tile, fromSeat };
       const result = calcYaku(test, ctx);
       if (result.error) { toast(result.error); return; }
@@ -2592,7 +2737,7 @@ if (document.getElementById('table')) {
         return;
       }
       if (G.isRiichi.bottom || G.scores.bottom < 1000) return;
-      if (!canDeclareRiichi(G.hands.bottom)) return;
+      if (!canDeclareRiichi(G.hands.bottom, meldTriples('bottom'))) return;
       if (NETQ() && NETQ().isGuest()) { NETQ().guestAction('riichi'); return; }  // 発声は宣言牌打牌時にイベントで届く
       G.isRiichi.bottom = true;
       G.riichiTurnsLeft.bottom = 4;  // 一発: 自分含めて 4ターン以内
@@ -2603,7 +2748,7 @@ if (document.getElementById('table')) {
       // 先頭の候補牌を自動選択 → あがり牌ガイドが即表示される (雀魂式)
       const dispOrder = sortHand(G.hands.bottom.filter((_, i) => i !== G.justDrawn));
       if (G.justDrawn != null && G.hands.bottom[G.justDrawn]) dispOrder.push(G.hands.bottom[G.justDrawn]);
-      G.selected = dispOrder.find(t => isTenpai13(G.hands.bottom.filter(x => x !== t))) || null;
+      G.selected = dispOrder.find(t => isTenpai13(G.hands.bottom.filter(x => x !== t), meldTriples('bottom'))) || null;
       toast('リーチ! 光っている牌を捨てると成立 (やめるなら「リーチ取消」)');
       renderAll();
     });
@@ -2642,7 +2787,7 @@ if (document.getElementById('table')) {
       if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
         e.preventDefault();
         if (G.turn !== 'bottom' || G.busy || G.roundOver) return;
-        if (G.hands.bottom.length !== 14) return;
+        if (!hasDrawn('bottom')) return;
         if (G.isRiichi.bottom && G.justRiichiDeclared !== 'bottom') return;  // リーチ後は選択不可
         // 表示順 (ソート済 + ツモ牌が末尾) で 選択を移動
         const displayed = sortHand(G.hands.bottom.filter((_, i) => i !== G.justDrawn));
@@ -2664,6 +2809,7 @@ if (document.getElementById('table')) {
       else if (e.key === 't' || e.key === 'T') clickIf('btn-tsumo');
       else if (e.key === 'l' || e.key === 'L') clickIf('btn-ron');
       else if (e.key === 'p' || e.key === 'P') clickIf('btn-pass');
+      else if (e.key === 'g' || e.key === 'G') clickIf('btn-kan');
       else if (e.key === 'k' || e.key === 'K') clickIf('btn-kita');
     });
   });

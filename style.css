@@ -502,3 +502,12 @@ body {
   .river-area--right { left: calc(50% + 82px); }
   .action-btn { font-size: 15px; }
 }
+
+/* ── 副露 (暗槓) 表示 + 中央カンドラ ── */
+.tile--meld { outline: 1px solid rgba(102,187,106,0.75); border-radius: 3px; }
+.center__kandora {
+  font-size: 9px;
+  color: #a5d6a7;
+  margin-top: 3px;
+  line-height: 1;
+}
