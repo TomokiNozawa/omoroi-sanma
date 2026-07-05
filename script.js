@@ -620,6 +620,19 @@ function countDora(hand, doraIndicator) {
   return hand.filter(t => t.id === doraId).length;
 }
 
+// 役の表示順 (慣例順: 状況役 → 手役 → ドラ系)
+const YAKU_DISPLAY_ORDER = [
+  '立直', '一発', '門前清自摸和',
+  'ピンフ', 'タンヤオ', '一盃口',
+  '白', '發', '中', '場風 東', '場風 南', '自風 東', '自風 南', '自風 西',
+  '七対子', '対々和', '三暗刻', '一気通貫', '二盃口', '混一色', '清一色',
+  'ドラ', '赤ドラ', '北抜き',
+];
+function yakuOrderIdx(name) {
+  const i = YAKU_DISPLAY_ORDER.findIndex(o => name === o || name.startsWith(o));
+  return i < 0 ? 40 : i;
+}
+
 // ─── 役判定 メイン ─────────────────────────
 function calcYaku(hand, context) {
   // context: { isTsumo, isRiichi, isOya, doraIndicator, kitas, round }
@@ -680,6 +693,9 @@ function calcYaku(hand, context) {
   if (akaCount > 0) { yakuList.push({ name: '赤ドラ', han: akaCount }); han += akaCount; }
   if (context.kitas > 0) { yakuList.push({ name: `北抜き×${context.kitas}`, han: context.kitas }); han += context.kitas; }
 
+  // 表示順を慣例順に整列: リーチ系 → 手役 → ドラ系 (雀魂等と同じ並び)
+  yakuList.sort((a, b) => yakuOrderIdx(a.name) - yakuOrderIdx(b.name));
+
   // 役なし? (役牌・タンヤオ等 1翻役以上が必要、 ドラ・北だけでは役なし)
   // ただし簡略化: 1翻以上あれば OK とする
   const yakuOnly = yakuList.filter(y => !y.name.startsWith('ドラ') && !y.name.startsWith('赤ドラ') && !y.name.startsWith('北抜き'));
@@ -688,6 +704,11 @@ function calcYaku(hand, context) {
   }
 
   return { yakuList, han, isYakuman: false };
+}
+
+// 結果モーダル用の牌スパン (手牌を小さく描く共通ヘルパー)
+function tileSpanHtml(t, extra = '') {
+  return `<span style="display:inline-block; width:26px; height:35px; border-radius:3px; background:url('assets/${encodeURIComponent(TILE_IMG[t.id])}') center/100% 100% no-repeat; ${extra}"></span>`;
 }
 
 // ─── 翻数 → 名前 ─────────────────────────
@@ -1589,10 +1610,25 @@ function endRound(reason) {
       for (const s of notenSeats) G.scores[s] -= payPer;
       for (const s of tenpaiSeats) G.scores[s] += recvPer;
     }
-    let txt = `山が尽きました。<br>テンパイ: ${tenpaiSeats.map(s => seatShareLabel(s)).join(', ') || 'なし'}<br>`;
+    let txt = `山が尽きました。<br>`;
     txt += `点棒移動: ${notenSeats.length > 0 && tenpaiSeats.length > 0 ? '3000点 ノーテン→テンパイ' : 'なし'}<br>`;
     txt += `現スコア: ${playingSeats.map(s => `${seatShareLabel(s)}=${G.scores[s].toLocaleString()}`).join(' / ')}`;
     if (G.kyotaku > 0) txt += `<br>供託 ${G.kyotaku}点 は 次のあがり者へ持ち越し`;
+    // 全員の手牌公開 (テンパイ=明るく強調 / ノーテン=薄く)
+    txt += '<div style="text-align:left; margin-top:8px;">';
+    for (const s of playingSeats) {
+      const tp = tenpaiSeats.includes(s);
+      txt += `<div style="margin:6px 0;${tp ? '' : ' opacity:0.45;'}">`;
+      txt += `<div style="font-size:11px; color:${tp ? '#ffeb3b' : '#aac'}; margin-bottom:2px;">${tp ? '✅ テンパイ' : '─ ノーテン'} ${seatShareLabel(s)}</div>`;
+      txt += '<div style="background:rgba(0,0,0,0.35); padding:4px 3px; border-radius:6px; line-height:1;">';
+      txt += sortHand(G.hands[s]).map(t => tileSpanHtml(t, 'width:20px; height:27px;')).join('');
+      if (G.kitaTiles[s] && G.kitaTiles[s].length > 0) {
+        txt += '<span style="display:inline-block; width:8px;"></span>';
+        txt += G.kitaTiles[s].map(t => tileSpanHtml(t, 'width:16px; height:22px; opacity:0.8;')).join('');
+      }
+      txt += '</div></div>';
+    }
+    txt += '</div>';
     document.getElementById('end-text').innerHTML = txt;
     // 親流れ判定: 親がテンパイなら 連荘、 ノーテンなら 流れる (流局は 常に本場+1)
     G.honba++;
@@ -1693,8 +1729,7 @@ function showWinModal(seat, hand, context, result) {
   const defaultTab = isOya ? 'oya' : 'ko';
 
   // あがり手牌 (ソート済 + あがり牌を右端で強調)
-  const tileSpan = (t, extra = '') =>
-    `<span style="display:inline-block; width:26px; height:35px; border-radius:3px; background:url('assets/${encodeURIComponent(TILE_IMG[t.id])}') center/100% 100% no-repeat; ${extra}"></span>`;
+  const tileSpan = tileSpanHtml;
   let handHtml = '<div style="background:rgba(0,0,0,0.35); padding:8px 6px 4px; border-radius:6px; margin:6px 0; text-align:center; line-height:1;">';
   const winTile = context.winTile;
   const restTiles = winTile ? (() => {

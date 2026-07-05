@@ -269,7 +269,7 @@ const NetGame = (() => {
 
   // ─── ホスト: リモート番の進行 ──────────────────
   function remotePlay(seat) {
-    // リーチ済リモート: CPU と同じ自動進行 (北自動抜き → ツモ勝ち → ツモ切り)
+    // リーチ済リモート: 自動進行 (北自動抜き → ツモ勝ち → ツモ切り、 雀魂の自動和了と同様)
     if (G.isRiichi[seat] && G.justRiichiDeclared !== seat) {
       let drawn = G.hands[seat][G.hands[seat].length - 1];
       while (drawn && drawn.id === KITA_ID && G.kingTiles.length > 0) {
@@ -277,7 +277,9 @@ const NetGame = (() => {
         renderAll();
         drawn = G.hands[seat][G.hands[seat].length - 1];
       }
-      setTimeout(() => cpuDiscard(seat, true), 500);
+      // ツモった14枚目を全クライアントに見せてから捨てる (河に直行させない)
+      renderAll();
+      setTimeout(() => cpuDiscard(seat, true), 1100);
       return;
     }
     // 通常: 公開して 本人の操作待ち (タイムアウトで CPU 代打ち)
