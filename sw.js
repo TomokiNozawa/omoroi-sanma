@@ -5,7 +5,7 @@
 //   - HTML: ネットワーク優先 + オフライン時はキャッシュ (更新が確実に届く)
 //   - version.json: ネットワーク優先 (最新バージョン表示用)
 // ※ リリース時は SW_VERSION を index/game.html の ?v= と同じ値に bump すること
-const SW_VERSION = '0.7.17';
+const SW_VERSION = '0.7.18';
 const CACHE_NAME = `omoroi-sanma-${SW_VERSION}`;
 
 const TILE_FILES = [

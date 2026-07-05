@@ -720,22 +720,28 @@ function renderHand(seat) {
       });
     }
   } else {
-    // CPU: 通常は伏せ、 局終了後は 表向きに公開 (「盤面を見る」 用)。 抜いた北は 末尾に表向き
+    // CPU: 通常は伏せ、 局終了後は 表向きに公開 (「盤面を見る」 用)。
+    // 抜いた北は 「本人から見て手牌の右」 = 対面: 画面左(先頭) / 下家: 画面上(先頭) / 上家: 画面下(末尾)
+    const handEls = [];
     if (G.roundOver && G.hands[seat].length > 0 && G.hands[seat][0] && G.hands[seat][0].id != null) {
       sortHand(G.hands[seat]).forEach(t => {
-        container.appendChild(createTileEl(t, { small: true }));
+        handEls.push(createTileEl(t, { small: true }));
       });
     } else {
       G.hands[seat].forEach(() => {
-        container.appendChild(createTileEl(null, { back: true, small: true }));
+        handEls.push(createTileEl(null, { back: true, small: true }));
       });
     }
-    G.kitaTiles[seat].forEach(kt => {
+    const kitaEls = G.kitaTiles[seat].map(kt => {
       const el = createTileEl(kt, { small: true });
       el.classList.add('tile--kita');
       el.title = '北抜き (+1翻)';
-      container.appendChild(el);
+      return el;
     });
+    const ordered = (seat === 'top' || seat === 'right')
+      ? [...kitaEls, ...handEls]
+      : [...handEls, ...kitaEls];
+    ordered.forEach(e => container.appendChild(e));
   }
 }
 
@@ -1294,7 +1300,7 @@ function discardTile(seat, tile) {
       } else {
         // CPU ロン: 自動宣言 (roundOver で 以降のターン進行を停止)
         const test = [...G.hands[checkSeat], tile];
-        playVoice('ron');
+        announce('ron');
         toast(`${SEAT_LABEL_BASE[checkSeat]} ロン! (${TILE_NAMES[tile.id]})`);
         G.busy = true;
         G.roundOver = true;
@@ -1318,7 +1324,7 @@ function kitaNuki(seat) {
   G.hands[seat].push(replacement);
   if (seat === 'bottom') G.justDrawn = G.hands[seat].length - 1;
   playSE('kita');
-  playVoice('kita');
+  announce('kita');
   toast(`${SEAT_LABEL_BASE[seat]} 北抜き (+1翻) / 抜き合計 ${G.kitas[seat]}`);
   return true;
 }
@@ -1424,7 +1430,7 @@ function cpuPlay(seat) {
       G.kyotaku += 1000;
       G.justRiichiDeclared = seat;  // 宣言ターン = この打牌が リーチ宣言牌 (横向き)
       playSE('riichi');
-      playVoice('riichi');
+      announce('riichi');
       toast(`${SEAT_LABEL_BASE[seat]} リーチ! (-1000点)`);
       // ※ 宣言ターンは テンパイ維持できる牌のみ捨てる (cpuDiscard 側で制限)
     }
@@ -1453,7 +1459,7 @@ function cpuDiscard(seat, forceTsumoTile = false) {
     };
     const result = calcYaku(G.hands[seat], ctx);
     if (!result.error && (result.han > 0 || result.isYakuman)) {
-      playVoice('tsumo');
+      announce('tsumo');
       toast(`${SEAT_LABEL_BASE[seat]} ツモ!`);
       G.roundOver = true;
       showWinModal(seat, G.hands[seat], ctx, result);
@@ -2046,6 +2052,37 @@ function _loadVoiceFile(kind) {
 if (typeof window !== 'undefined' && typeof Audio !== 'undefined') {
   Object.keys(VOICE_DEFS).forEach(_loadVoiceFile);  // 起動時にプリロード判定
 }
+// ─── 宣言カットイン演出 (帯バナー) + ボイス/SE をまとめて発火 ───
+const CALLOUT_DEFS = {
+  riichi: { text: 'リーチ!', color: 'rgba(230,81,0,0.92)' },
+  ron:    { text: 'ロン!',   color: 'rgba(198,40,40,0.94)' },
+  tsumo:  { text: 'ツモ!',   color: 'rgba(175,124,10,0.94)' },
+  kita:   { text: '北抜き',  color: 'rgba(21,101,192,0.92)' },
+};
+let _calloutTimer = null;
+function showCallout(kind) {
+  try {
+    const def = CALLOUT_DEFS[kind];
+    const el = document.getElementById('callout');
+    const tx = document.getElementById('callout-text');
+    if (!def || !el || !tx) return;
+    tx.textContent = def.text;
+    tx.style.setProperty('--callout-bg', def.color);
+    el.hidden = false;
+    // 連続宣言でもアニメを 先頭から再生
+    tx.style.animation = 'none';
+    void tx.offsetWidth;
+    tx.style.animation = '';
+    if (_calloutTimer) clearTimeout(_calloutTimer);
+    _calloutTimer = setTimeout(() => { el.hidden = true; }, 1150);
+  } catch (e) { /* 演出失敗でもゲームは止めない */ }
+}
+// 宣言 = カットイン + ボイス (SE は 各所で既存のまま)
+function announce(kind) {
+  showCallout(kind);
+  playVoice(kind);
+}
+
 function playVoice(kind) {
   if (seMuted) return;
   const text = VOICE_DEFS[kind];
@@ -2221,7 +2258,7 @@ if (document.getElementById('table')) {
       const result = calcYaku(G.hands.bottom, ctx);
       if (result.error) { toast(result.error); return; }
       if (result.han === 0 && !result.isYakuman) { toast('役なし'); return; }
-      playVoice('tsumo');
+      announce('tsumo');
       showWinModal('bottom', G.hands.bottom, ctx, result);
     });
     document.getElementById('btn-ron')?.addEventListener('click', () => {
@@ -2235,7 +2272,7 @@ if (document.getElementById('table')) {
       if (result.error) { toast(result.error); return; }
       G.pendingRon = null;
       G.busy = false;
-      playVoice('ron');
+      announce('ron');
       showWinModal('bottom', test, ctx, result);
     });
     document.getElementById('btn-pass')?.addEventListener('click', () => {
@@ -2270,7 +2307,7 @@ if (document.getElementById('table')) {
       G.scores.bottom -= 1000;
       G.kyotaku += 1000;
       G.justRiichiDeclared = 'bottom';  // 次の打牌が リーチ宣言牌 (横向き)
-      playVoice('riichi');
+      announce('riichi');
       // 先頭の候補牌を自動選択 → あがり牌ガイドが即表示される (雀魂式)
       const dispOrder = sortHand(G.hands.bottom.filter((_, i) => i !== G.justDrawn));
       if (G.justDrawn != null && G.hands.bottom[G.justDrawn]) dispOrder.push(G.hands.bottom[G.justDrawn]);

@@ -289,10 +289,10 @@ body {
   box-shadow: 0 0 0 1px rgba(255,235,59,0.5);
   align-self: flex-end;
 }
-/* CPU席: 伏せ牌の列と 北の間に 間隔 (横並びは左margin、 縦並びは上margin) */
-.seat__hand--top .tile:not(.tile--kita) + .tile--kita { margin-left: 14px; }
-.seat__hand--left .tile:not(.tile--kita) + .tile--kita,
-.seat__hand--right .tile:not(.tile--kita) + .tile--kita { margin-top: 14px; }
+/* CPU席: 北と手牌の間隔 — 北は本人の右 = 対面/下家は先頭、 上家は末尾 */
+.seat__hand--top .tile--kita + .tile:not(.tile--kita) { margin-left: 14px; }
+.seat__hand--right .tile--kita + .tile:not(.tile--kita) { margin-top: 14px; }
+.seat__hand--left .tile:not(.tile--kita) + .tile--kita { margin-top: 14px; }
 
 /* ── アクションバー (タップ領域 ≥44px、 有効時に色分け) ── */
 .action-bar { display: flex; gap: 5px; padding: 6px 8px; background: rgba(0,0,0,0.55); align-items: stretch; justify-content: space-around; }
@@ -363,6 +363,42 @@ body {
 .riichi-guide__label { font-weight: bold; color: #ff8a80; margin-right: 2px; }
 .riichi-guide__count { color: #ffeb3b; font-size: 10px; margin-right: 5px; }
 .riichi-guide__furiten { color: #ff8a80; font-size: 10px; font-weight: bold; margin-left: 4px; }
+
+/* ── 宣言カットイン (リーチ/ロン/ツモ/北抜き の帯バナー演出) ── */
+.callout {
+  position: fixed;
+  top: 38%;
+  left: 0;
+  right: 0;
+  z-index: 130;           /* モーダルより上、 タップは素通し */
+  pointer-events: none;
+  text-align: center;
+  overflow: hidden;
+}
+.callout[hidden] { display: none; }
+.callout__text {
+  display: inline-block;
+  min-width: 70%;
+  padding: 6px 40px;
+  font-size: 42px;
+  font-weight: 900;
+  letter-spacing: 10px;
+  color: #fff;
+  text-shadow: 0 2px 10px rgba(0,0,0,0.7), 0 0 18px rgba(255,255,255,0.35);
+  background: linear-gradient(90deg,
+    transparent 0%, var(--callout-bg, rgba(211,47,47,0.92)) 16%,
+    var(--callout-bg, rgba(211,47,47,0.92)) 84%, transparent 100%);
+  animation: callout-in 1.1s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+@keyframes callout-in {
+  0%   { transform: scale(2.4); opacity: 0; }
+  16%  { transform: scale(1);   opacity: 1; }
+  78%  { transform: scale(1);   opacity: 1; }
+  100% { transform: scale(1.05); opacity: 0; }
+}
+@media (max-width: 639px) {
+  .callout__text { font-size: 30px; letter-spacing: 6px; padding: 5px 24px; }
+}
 
 /* ── 盤面を見る ⇄ 結果に戻る (局終了時の一時閉じ) ── */
 .peek-return {

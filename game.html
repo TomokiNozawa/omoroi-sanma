@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="theme-color" content="#0d3b1f">
-  <link rel="stylesheet" href="style.css?v=0.7.17">
+  <link rel="stylesheet" href="style.css?v=0.7.18">
   <title>対戦中 — おもろい三麻</title>
 </head>
 <body class="game-body">
@@ -120,6 +120,11 @@
   <div class="toast" id="toast" hidden></div>
   <button class="peek-return" id="peek-return" hidden>📊 結果に戻る</button>
 
+  <!-- 宣言カットイン演出 (リーチ/ロン/ツモ/北抜き) -->
+  <div class="callout" id="callout" hidden>
+    <span class="callout__text" id="callout-text">リーチ!</span>
+  </div>
+
   <div class="end-overlay" id="end-overlay" hidden>
     <div class="end-modal">
       <h2 class="end-modal__title" id="end-title">流局</h2>
@@ -132,6 +137,6 @@
     </div>
   </div>
 
-  <script src="script.js?v=0.7.17"></script>
+  <script src="script.js?v=0.7.18"></script>
 </body>
 </html>
