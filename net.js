@@ -133,6 +133,9 @@ class FirebaseNet {
     await _loadScript(FIREBASE_SDK_BASE + 'firebase-database-compat.js');
     /* global firebase */
     this.app = firebase.initializeApp(this.config, 'omoroi-net');
+    // タブ単位の匿名ユーザー (SESSION 永続化)。 LOCAL だと同一ブラウザの2タブが同一uidになり
+    // players/{uid} を互いに上書きして同席できない (同一PC 2窓テストで発覚)
+    await this.app.auth().setPersistence(firebase.auth.Auth.Persistence.SESSION);
     const cred = await this.app.auth().signInAnonymously();
     this.uid = cred.user.uid;
     this.db = this.app.database();

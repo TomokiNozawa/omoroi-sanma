@@ -1,13 +1,12 @@
 // Firebase 設定 (Phase 2 リアルタイム対戦用)
-// 野沢さんの Firebase Console セットアップ完了後、 ここを実際の設定で全置換する。
-// null の間は 「ルーム対戦は準備中」 表示 + ?local=1 のタブ間対戦のみ動作。
-const FIREBASE_CONFIG = null;
-/* 置換例:
+// omoroi-sanma プロジェクト (Spark プラン / asia-southeast1) — 2026-07-05 野沢さんセットアップ
+// apiKey は Web クライアント用の公開識別子 (機密ではない)。アクセス制御は RTDB ルール + 匿名認証が担う。
 const FIREBASE_CONFIG = {
-  apiKey: "AIza...",
+  apiKey: "AIzaSyDIvwvfVpxETNTdbGY1Thjr64ZPyPXTZvk",
   authDomain: "omoroi-sanma.firebaseapp.com",
   databaseURL: "https://omoroi-sanma-default-rtdb.asia-southeast1.firebasedatabase.app",
   projectId: "omoroi-sanma",
-  appId: "1:xxxx:web:xxxx"
+  storageBucket: "omoroi-sanma.firebasestorage.app",
+  messagingSenderId: "613968887979",
+  appId: "1:613968887979:web:4b067e3137788ac18237ee"
 };
-*/
