@@ -221,8 +221,18 @@ body {
   flex-shrink: 0;
   box-shadow: 0 1px 1px rgba(0,0,0,0.5);
 }
-/* left/right も bottom/top と同じ 縦長 wall-tile (rotate で 視覚的に縦並びになる) */
 .seat__wall { padding: 2px; }
+/* 上家/下家の山: 本人向き = 横向きの牌
+   (モバイルは 10×8 に抑えて 河との間隔を維持、 PC は media query で 20×14) */
+.seat__wall--left .wall-tile,
+.seat__wall--right .wall-tile { width: 10px; height: 8px; background: linear-gradient(90deg, #0e6e3e 0%, #094a28 100%); }
+/* 側面の山のドラ表示 (画像): 縦箱を±90°回転し、マージン補正で横箱に収める */
+.seat__wall--left .wall-tile--dora,
+.seat__wall--right .wall-tile--dora { width: 8px; height: 10px; margin: -1px 1px; }
+.seat__wall--left .wall-tile--dora { transform: rotate(90deg); }
+.seat__wall--right .wall-tile--dora { transform: rotate(-90deg); }
+/* 対面の山のドラ表示: 対面向き = 180° (箱サイズ不変) */
+.seat__wall--top .wall-tile--dora { transform: rotate(180deg); }
 .wall-tile--next {
   background: linear-gradient(180deg, #ffeb3b 0%, #fbc02d 100%);
   border-color: #f57f17;
@@ -444,6 +454,10 @@ body {
   .game__header { font-size: 13px; }
   .game__hint { font-size: 13px; }
   .wall-tile { width: 14px; height: 20px; }
+  .seat__wall--left .wall-tile,
+  .seat__wall--right .wall-tile { width: 20px; height: 14px; }
+  .seat__wall--left .wall-tile--dora,
+  .seat__wall--right .wall-tile--dora { width: 14px; height: 20px; margin: -3px 3px; }
   .center { width: 140px; padding: 8px; }
   .seat__label { font-size: 13px; }
   .center__round-info { font-size: 13px; }
