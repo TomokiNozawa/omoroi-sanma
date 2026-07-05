@@ -311,7 +311,7 @@ const NetGame = (() => {
     G.kyotaku += 1000;
     G.justRiichiDeclared = seat;
     playSE('riichi');
-    playVoice('riichi');
+    announce('riichi');
     toast(`${seatDispName(seat)} リーチ! (-1000点)`);
     renderAll();
     armTurnTimeout(seat);  // 宣言牌の打牌待ち
@@ -340,7 +340,7 @@ const NetGame = (() => {
     const result = calcYaku(G.hands[seat], ctx);
     if (result.error || (result.han === 0 && !result.isYakuman)) return;
     clearTimeout(S.turnTimer);
-    playVoice('tsumo');
+    announce('tsumo');
     toast(`${seatDispName(seat)} ツモ!`);
     showWinModal(seat, G.hands[seat], ctx, result);
   }
@@ -357,7 +357,7 @@ const NetGame = (() => {
     };
     const result = calcYaku(test, ctx);
     if (result.error || (result.han === 0 && !result.isYakuman)) return resumeAfterOffer();
-    playVoice('ron');
+    announce('ron');
     toast(`${seatDispName(seat)} ロン!`);
     showWinModal(seat, test, ctx, result);
   }
