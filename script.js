@@ -720,10 +720,16 @@ function renderHand(seat) {
       });
     }
   } else {
-    // CPU: 伏せ + 抜いた北は 末尾に表向き
-    G.hands[seat].forEach(() => {
-      container.appendChild(createTileEl(null, { back: true, small: true }));
-    });
+    // CPU: 通常は伏せ、 局終了後は 表向きに公開 (「盤面を見る」 用)。 抜いた北は 末尾に表向き
+    if (G.roundOver && G.hands[seat].length > 0 && G.hands[seat][0] && G.hands[seat][0].id != null) {
+      sortHand(G.hands[seat]).forEach(t => {
+        container.appendChild(createTileEl(t, { small: true }));
+      });
+    } else {
+      G.hands[seat].forEach(() => {
+        container.appendChild(createTileEl(null, { back: true, small: true }));
+      });
+    }
     G.kitaTiles[seat].forEach(kt => {
       const el = createTileEl(kt, { small: true });
       el.classList.add('tile--kita');
@@ -1473,7 +1479,7 @@ function endRound(reason) {
     document.getElementById('end-text').textContent = `${G.round}局 終了。`;
   }
   G.roundOver = true;
-  renderSeats();
+  renderAll();  // 全員の手牌を表向き公開 (「盤面を見る」 用)
   document.getElementById('end-overlay').hidden = false;
 }
 
@@ -1534,6 +1540,8 @@ function showWinModal(seat, hand, context, result) {
   playSE('win');
 
   // 点数移動 (現在の本場で計算) → その後 連荘/本場 更新
+  const prevHonba = G.honba;
+  const prevKyotaku = G.kyotaku;
   const transfers = applyWinScore(seat, context, result);
   if (G.oya === seat) {
     G.honba++;
@@ -1579,8 +1587,25 @@ function showWinModal(seat, hand, context, result) {
   handHtml += `<div style="font-size:9px; color:#aac; margin-top:3px;">${winTile ? `右端が${winType}あがり牌` : ''}${G.kitaTiles[seat] && G.kitaTiles[seat].length > 0 ? ' / 小さい北=北抜き' : ''}</div>`;
   handHtml += '</div>';
 
+  // 獲得点バナー (今回の点数を 最初に大きく)
+  const gain = transfers[seat] || 0;
+  const payerCount = ALL_SEATS.filter(s => s !== G.emptySeat && s !== seat).length;
+  const honbaAdd = prevHonba > 0 ? (context.isTsumo ? 100 * prevHonba * payerCount : 300 * prevHonba) : 0;
+  const baseGain = gain - prevKyotaku - honbaAdd;
+  const fromLabel = context.isTsumo
+    ? (isOya ? `親ツモ — 全員から ${(baseGain / Math.max(1, payerCount)).toLocaleString()}点ずつ` : 'ツモ — 親と子から')
+    : `ロン — ${SEAT_LABEL_BASE[context.fromSeat] || ''} の支払い`;
+  let bannerHtml = '<div style="background:rgba(255,235,59,0.15); border:1px solid rgba(255,235,59,0.5); border-radius:8px; padding:8px 10px; margin:6px 0; text-align:center;">';
+  bannerHtml += `<div style="font-size:26px; font-weight:bold; color:#ffeb3b; line-height:1.2;">+${gain.toLocaleString()}<span style="font-size:14px;">点</span></div>`;
+  bannerHtml += `<div style="font-size:10px; color:#cde;">${fromLabel}`;
+  const parts = [];
+  if (honbaAdd > 0) parts.push(`本場 +${honbaAdd.toLocaleString()}`);
+  if (prevKyotaku > 0) parts.push(`供託 +${prevKyotaku.toLocaleString()}`);
+  if (parts.length > 0) bannerHtml += ` (基本 ${baseGain.toLocaleString()} + ${parts.join(' + ')})`;
+  bannerHtml += '</div></div>';
+
   // 役一覧 (今回の hit のみ)
-  let yakuHtml = handHtml;
+  let yakuHtml = bannerHtml + handHtml;
   yakuHtml += '<div style="background:rgba(255,235,59,0.12); padding:6px 8px; border-radius:6px; margin:6px 0; text-align:left; font-size:11px;">';
   yakuHtml += '<b style="color:#ffeb3b;">今回の役:</b> ';
   yakuHtml += result.yakuList.map(y => `${y.name}<small>(${y.han}翻)</small>`).join(' / ');
@@ -1602,14 +1627,20 @@ function showWinModal(seat, hand, context, result) {
     SCORE_TABLE.forEach((row, i) => {
       const hit = (i === hitRowIdx);
       const rowStyle = hit ? 'background:#ffeb3b; color:#000; font-weight:bold;' : 'background:rgba(255,255,255,0.05); color:#ddd;';
+      // 今回の点数セル: あがった人のタブ + 該当翻の行 + ロン/ツモの列 に 赤枠+📍
+      const isWinnerTab = (tab === defaultTab);
+      const hiRon = (hit && isWinnerTab && !context.isTsumo) ? ' outline:2px solid #f44336; outline-offset:-2px;' : '';
+      const hiTsumo = (hit && isWinnerTab && context.isTsumo) ? ' outline:2px solid #f44336; outline-offset:-2px;' : '';
+      const pinRon = hiRon ? '📍' : '';
+      const pinTsumo = hiTsumo ? '📍' : '';
       html += `<tr style="${rowStyle}">`;
       html += `<td style="padding:3px 4px; border:1px solid #4a6;">${row.label}</td>`;
       if (tab === 'oya') {
-        html += `<td style="padding:3px 4px; border:1px solid #4a6; text-align:right;">${row.oyaRon.toLocaleString()}</td>`;
-        html += `<td style="padding:3px 4px; border:1px solid #4a6; text-align:right;">${row.oyaTsumo.toLocaleString()}</td>`;
+        html += `<td style="padding:3px 4px; border:1px solid #4a6; text-align:right;${hiRon}">${pinRon}${row.oyaRon.toLocaleString()}</td>`;
+        html += `<td style="padding:3px 4px; border:1px solid #4a6; text-align:right;${hiTsumo}">${pinTsumo}${row.oyaTsumo.toLocaleString()}</td>`;
       } else {
-        html += `<td style="padding:3px 4px; border:1px solid #4a6; text-align:right;">${row.koRon.toLocaleString()}</td>`;
-        html += `<td style="padding:3px 4px; border:1px solid #4a6; text-align:right;">${row.koTsumoOya.toLocaleString()} / ${row.koTsumoKo.toLocaleString()}</td>`;
+        html += `<td style="padding:3px 4px; border:1px solid #4a6; text-align:right;${hiRon}">${pinRon}${row.koRon.toLocaleString()}</td>`;
+        html += `<td style="padding:3px 4px; border:1px solid #4a6; text-align:right;${hiTsumo}">${pinTsumo}${row.koTsumoOya.toLocaleString()} / ${row.koTsumoKo.toLocaleString()}</td>`;
       }
       html += '</tr>';
     });
@@ -1634,9 +1665,9 @@ function showWinModal(seat, hand, context, result) {
   html += `<button id="win-tab-ko" class="win-tab" data-tab="ko" style="flex:1; padding:6px; border:1px solid #4a6; background:${defaultTab === 'ko' ? '#4caf50' : '#143820'}; color:#fff; cursor:pointer; border-radius:4px 4px 0 0; font-size:12px;">子で上がった場合</button>`;
   html += '</div>';
   html += `<div id="win-table-area">${buildTable(defaultTab)}</div>`;
-  html += `<p style="margin:8px 0 0; font-size:10px; color:#aac; text-align:left;">※ 30符固定の簡易点数表 (4麻標準)、 該当翻数を黄色で強調</p>`;
+  html += `<p style="margin:8px 0 0; font-size:10px; color:#aac; text-align:left;">※ 30符固定の簡易点数表 (4麻標準)。 黄色行=該当翻数、 📍赤枠=今回の点数 (+本場・供託が加算)</p>`;
   textEl.innerHTML = html;
-  renderSeats();  // ラベルの点数表示を更新
+  renderAll();  // 全員の手牌を表向き公開 + ラベル点数更新 (「盤面を見る」用)
   overlay.hidden = false;
 
   // タブ クリック
@@ -1737,6 +1768,8 @@ function startNewRound() {
   G.lastDiscard = null;
   const nextBtn = document.getElementById('end-next');
   if (nextBtn) nextBtn.style.display = '';
+  const peekReturn = document.getElementById('peek-return');
+  if (peekReturn) peekReturn.hidden = true;
   renderAll();
 
   if (localStorage.getItem('omoroi-guide-done')) {
@@ -2099,6 +2132,17 @@ if (document.getElementById('table')) {
     });
     document.getElementById('end-next')?.addEventListener('click', nextRound);
     document.getElementById('dice-ok')?.addEventListener('click', closeDiceCeremony);
+    // 盤面を見る ⇄ 結果に戻る (局終了時、 モーダルを一時的に閉じて 公開された手牌と河を見る)
+    document.getElementById('end-peek')?.addEventListener('click', () => {
+      document.getElementById('end-overlay').hidden = true;
+      const pr = document.getElementById('peek-return');
+      if (pr) pr.hidden = false;
+    });
+    document.getElementById('peek-return')?.addEventListener('click', () => {
+      const pr = document.getElementById('peek-return');
+      if (pr) pr.hidden = true;
+      document.getElementById('end-overlay').hidden = false;
+    });
     // 画面幅が変わったら 河のグリッド配置を再計算 (モバイル⇔PC)
     let resizeTimer = null;
     window.addEventListener('resize', () => {
