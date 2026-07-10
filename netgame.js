@@ -219,7 +219,7 @@ const NetGame = (() => {
       events: S.events,
       offer: S.pendingOffer
         ? { kind: S.pendingOffer.kind || 'ron', seat: S.pendingOffer.seat, fromSeat: S.pendingOffer.fromSeat,
-            tile: S.pendingOffer.tile, canKan: !!S.pendingOffer.canKan }
+            tile: S.pendingOffer.tile, canKan: !!S.pendingOffer.canKan, chankan: !!S.pendingOffer.chankan }
         : null,
       endInfo: S.endInfo || null,
     };
@@ -314,6 +314,7 @@ const NetGame = (() => {
       if (act.type === 'riichi') return hostApplyRiichi(seat);
       if (act.type === 'kita') return hostApplyKita(seat);
       if (act.type === 'ankan') return hostApplyAnkan(seat, act.id);
+      if (act.type === 'kakan') return hostApplyKakan(seat, act.id);
       if (act.type === 'pon') return hostApplyPon(seat);
       if (act.type === 'minkan') return hostApplyMinkan(seat);
       if (act.type === 'tsumo') return hostApplyTsumo(seat);
@@ -376,6 +377,15 @@ const NetGame = (() => {
       armTurnTimeout(seat);
     }
   }
+  function hostApplyKakan(seat, id) {
+    if (G.roundOver || G.turn !== seat || !hasDrawn(seat)) return;
+    if (G.justRiichiDeclared === seat) return;
+    if (!kakanCandidateIds(seat).includes(id)) return;
+    const r = doKakan(seat, id);
+    renderAll();
+    if (r === 'done') armTurnTimeout(seat);
+    // 'pending' (搶槓オファー中) / 'robbed' はそれぞれのフローで続行
+  }
   function hostApplyTsumo(seat) {
     if (G.roundOver || G.turn !== seat || !hasDrawn(seat)) return;
     if (G.justRiichiDeclared === seat) return;
@@ -386,6 +396,7 @@ const NetGame = (() => {
       doraIndicator: G.doraIndicator, uraIndicator: G.uraIndicator, kanDora: G.kanDoraInd, extraTiles: meldExtraTiles(seat), openMeldIds: openMeldIds(seat), kitas: G.kitas[seat], round: G.round,
       isDoubleRiichi: G.doubleRiichi[seat], firstDraw: G.rivers[seat].length === 0 && G.kitas[seat] === 0, isHaitei: G.drawTiles.length === 0, isIppatsu: G.riichiTurnsLeft[seat] > 0,
       winTile: drawnIdx != null ? G.hands[seat][drawnIdx] : null,
+      isRinshan: G.justKanDrawn === seat,
     };
     const result = calcYaku(equivHand(seat), ctx);
     if (result.error || (result.han === 0 && !result.isYakuman)) return;
@@ -396,7 +407,7 @@ const NetGame = (() => {
   }
   function hostApplyRon(seat) {
     if (!S.pendingOffer || (S.pendingOffer.kind || 'ron') !== 'ron' || S.pendingOffer.seat !== seat || G.roundOver) return;
-    const { fromSeat, tile } = S.pendingOffer;
+    const { fromSeat, tile, chankan } = S.pendingOffer;
     clearTimeout(S.offerTimer);
     S.pendingOffer = null;
     const test = [...G.hands[seat], tile, ...meldTriples(seat)];
@@ -404,9 +415,16 @@ const NetGame = (() => {
       isTsumo: false, isRiichi: G.isRiichi[seat], isOya: G.oya === seat, seatWind: seatWindOf(seat),
       doraIndicator: G.doraIndicator, uraIndicator: G.uraIndicator, kanDora: G.kanDoraInd, extraTiles: meldExtraTiles(seat), openMeldIds: openMeldIds(seat), kitas: G.kitas[seat], round: G.round,
       isDoubleRiichi: G.doubleRiichi[seat], firstDraw: G.rivers[seat].length === 0 && G.kitas[seat] === 0, isHaitei: G.drawTiles.length === 0, isIppatsu: G.riichiTurnsLeft[seat] > 0, winTile: tile, fromSeat,
+      isChankan: !!chankan,
     };
     const result = calcYaku(test, ctx);
     if (result.error || (result.han === 0 && !result.isYakuman)) return resumeAfterOffer();
+    // 搶槓成立: 加槓牌はロン者へ (加槓者の手牌から除去、 加槓は不成立)
+    if (chankan && G.pendingKakan) {
+      const hi = G.hands[fromSeat].indexOf(tile);
+      if (hi >= 0) G.hands[fromSeat].splice(hi, 1);
+      G.pendingKakan = null;
+    }
     announce('ron');
     toast(`${seatDispName(seat)} ロン!`);
     showWinModal(seat, test, ctx, result);
@@ -419,14 +437,26 @@ const NetGame = (() => {
   }
   function resumeAfterOffer() {
     if (G.roundOver) return;
+    // 搶槓オファーの見逃し/時間切れ: 加槓を完了して 加槓者のターン続行
+    if (G.pendingKakan) {
+      const seat = G.pendingKakan.seat;
+      completePendingKakan();
+      G.busy = false;
+      renderAll();
+      if (seat === 'bottom') return;               // ホスト自身: 嶺上牌で操作継続
+      if (isRemoteSeat(seat)) return armTurnTimeout(seat);
+      G.busy = true;
+      setTimeout(() => cpuDiscard(seat), 500);     // CPU: ツモ勝ち判定込みで打牌続行
+      return;
+    }
     G.busy = false;
     renderAll();
     setTimeout(() => { nextTurn(); startTurn(); }, 120);
   }
 
-  // ─── ホスト: リモート席へのロンオファー (discardTile から) ──
-  function offerRon(seat, fromSeat, tile) {
-    S.pendingOffer = { kind: 'ron', seat, fromSeat, tile };
+  // ─── ホスト: リモート席へのロンオファー (discardTile / doKakan(搶槓) から) ──
+  function offerRon(seat, fromSeat, tile, chankan = false) {
+    S.pendingOffer = { kind: 'ron', seat, fromSeat, tile, chankan };
     G.busy = true;
     renderAll();
     clearTimeout(S.offerTimer);
@@ -556,7 +586,7 @@ const NetGame = (() => {
       if (offer.kind === 'call') {
         G.pendingCall = { fromSeat: rotSeat(offer.fromSeat, k), tile: offer.tile, canKan: !!offer.canKan };
       } else {
-        G.pendingRon = { fromSeat: rotSeat(offer.fromSeat, k), tile: offer.tile };
+        G.pendingRon = { fromSeat: rotSeat(offer.fromSeat, k), tile: offer.tile, chankan: !!offer.chankan };
       }
     }
     // 演出イベント再生 (リーチ/ロン/ツモ/北抜き のカットイン+ボイス)
@@ -646,7 +676,7 @@ const NetGame = (() => {
   return {
     boot, onRender, onWinModal, onEndRound, onGameEnd, onNewRound,
     onCeremony, recordEvent,
-    offerRon, offerCall, remotePlay, isRemoteSeat, hasOffer,
+    offerRon, offerCall, remotePlay, isRemoteSeat, hasOffer, armTurnTimeout,
     isGuest, isHost,
     guestAction, sendDiscard,
     seatDispName, pubName,

@@ -6,7 +6,7 @@
   <meta name="description" content="おもろい三麻 - 初心者向け 三人麻雀 Webアプリ (関西ルール / 翻数のみ / 全部赤ドラ / 北抜きあり)">
   <meta name="theme-color" content="#0d3b1f">
   <link rel="manifest" href="manifest.json">
-  <link rel="stylesheet" href="style.css?v=0.9.0">
+  <link rel="stylesheet" href="style.css?v=0.9.1b">
   <title>おもろい三麻 — 初心者向け三人麻雀</title>
 </head>
 <body>
@@ -44,7 +44,7 @@
 
     <!-- ルールオプション (ソロ/ルーム共通、 localStorage 保持) -->
     <div class="lobby__opts" style="display:flex; gap:18px; justify-content:center; margin:10px 0 0; font-size:12px; color:#cde;">
-      <label style="cursor:pointer; display:flex; align-items:center; gap:5px;"><input type="checkbox" id="opt-naki" checked> ポン・明槓あり</label>
+      <label style="cursor:pointer; display:flex; align-items:center; gap:5px;"><input type="checkbox" id="opt-naki" checked> ポン・明槓・加槓あり</label>
       <label style="cursor:pointer; display:flex; align-items:center; gap:5px;"><input type="checkbox" id="opt-tobi" checked> トビ終了あり</label>
     </div>
 
@@ -77,8 +77,8 @@
     </footer>
   </main>
 
-  <script src="firebase-config.js?v=0.9.0"></script>
-  <script src="script.js?v=0.9.0"></script>
+  <script src="firebase-config.js?v=0.9.1b"></script>
+  <script src="script.js?v=0.9.1b"></script>
   <script>
     // ルーム作成/参加 ダイアログ (合言葉制)
     (function () {
