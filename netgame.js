@@ -205,13 +205,14 @@ const NetGame = (() => {
       remain: G.drawTiles.length, kingRemain: G.kingTiles.length,
       doraIndicator: G.doraIndicator, doraSeat: G.doraSeat, doraDouIdx: G.doraDouIdx,
       drawPosList: G.drawPosList, kingCells: G.kingCells,
+      kingUsed: G.kingUsedCells, kanDoraCells: G.kanDoraCells,
       startSeat: G.startSeat, cutPosInStart: G.cutPosInStart,
       lastDiscardSeat: lastDiscardSeat(),
       seatNames: S.seatNames,
       phase: G.ceremonyActive ? 'dice' : 'play',
       roundOver: !!G.roundOver,
       melds: G.melds,
-      kanDora: G.kanDoraInd,
+      kanDora: G.kanDoraInd, kanUra: kanUraNow(),
       rules: G.rules,
       handsOpen: G.roundOver ? G.hands : null,  // 局終了後は全手牌公開 (勝利演出/テンパイ確認)
       dice: (G.diceD1 ? [G.diceD1, G.diceD2] : null),
@@ -279,7 +280,7 @@ const NetGame = (() => {
     // リーチ済リモート: 自動進行 (北自動抜き → ツモ勝ち → ツモ切り、 雀魂の自動和了と同様)
     if (G.isRiichi[seat] && G.justRiichiDeclared !== seat) {
       let drawn = G.hands[seat][G.hands[seat].length - 1];
-      while (drawn && drawn.id === KITA_ID && G.kingTiles.length > 0) {
+      while (drawn && drawn.id === KITA_ID && canRinshanDraw()) {
         kitaNuki(seat);
         renderAll();
         drawn = G.hands[seat][G.hands[seat].length - 1];
@@ -393,7 +394,7 @@ const NetGame = (() => {
     const drawnIdx = (G.justDrawnAll && G.justDrawnAll[seat] != null) ? G.justDrawnAll[seat] : null;
     const ctx = {
       isTsumo: true, isRiichi: G.isRiichi[seat], isOya: G.oya === seat, seatWind: seatWindOf(seat),
-      doraIndicator: G.doraIndicator, uraIndicator: G.uraIndicator, kanDora: G.kanDoraInd, extraTiles: meldExtraTiles(seat), openMeldIds: openMeldIds(seat), kitas: G.kitas[seat], round: G.round,
+      doraIndicator: G.doraIndicator, uraIndicator: G.uraIndicator, kanDora: G.kanDoraInd, kanUra: kanUraNow(), extraTiles: meldExtraTiles(seat), openMeldIds: openMeldIds(seat), kitas: G.kitas[seat], round: G.round,
       isDoubleRiichi: G.doubleRiichi[seat], firstDraw: G.rivers[seat].length === 0 && G.kitas[seat] === 0, isHaitei: G.drawTiles.length === 0, isIppatsu: G.riichiTurnsLeft[seat] > 0,
       winTile: drawnIdx != null ? G.hands[seat][drawnIdx] : null,
       isRinshan: G.justKanDrawn === seat,
@@ -413,7 +414,7 @@ const NetGame = (() => {
     const test = [...G.hands[seat], tile, ...meldTriples(seat)];
     const ctx = {
       isTsumo: false, isRiichi: G.isRiichi[seat], isOya: G.oya === seat, seatWind: seatWindOf(seat),
-      doraIndicator: G.doraIndicator, uraIndicator: G.uraIndicator, kanDora: G.kanDoraInd, extraTiles: meldExtraTiles(seat), openMeldIds: openMeldIds(seat), kitas: G.kitas[seat], round: G.round,
+      doraIndicator: G.doraIndicator, uraIndicator: G.uraIndicator, kanDora: G.kanDoraInd, kanUra: kanUraNow(), extraTiles: meldExtraTiles(seat), openMeldIds: openMeldIds(seat), kitas: G.kitas[seat], round: G.round,
       isDoubleRiichi: G.doubleRiichi[seat], firstDraw: G.rivers[seat].length === 0 && G.kitas[seat] === 0, isHaitei: G.drawTiles.length === 0, isIppatsu: G.riichiTurnsLeft[seat] > 0, winTile: tile, fromSeat,
       isChankan: !!chankan,
     };
@@ -570,6 +571,8 @@ const NetGame = (() => {
     G.doraDouIdx = pub.doraDouIdx;
     G.drawPosList = (pub.drawPosList || []).map(p => ({ ...p, seat: rotSeat(p.seat, k) }));
     G.kingCells = (pub.kingCells || []).map(p => ({ ...p, seat: rotSeat(p.seat, k) }));
+    G.kingUsedCells = (pub.kingUsed || []).map(p => ({ ...p, seat: rotSeat(p.seat, k) }));
+    G.kanDoraCells = (pub.kanDoraCells || []).map(p => ({ ...p, seat: rotSeat(p.seat, k) }));
     G.startSeat = rotSeat(pub.startSeat, k);
     G.cutPosInStart = pub.cutPosInStart;
     S.seatNames = rotKeys(pub.seatNames || {}, k);

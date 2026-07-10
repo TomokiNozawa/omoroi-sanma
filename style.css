@@ -253,6 +253,11 @@ body {
   border: 1px solid #ffeb3b !important;
   box-shadow: 0 0 6px rgba(255,235,59,0.7) !important;
 }
+/* カンドラ表示牌: 王牌内で表向き (緑の光でドラ表示と区別) */
+.wall-tile--kandora {
+  border-color: #81c784 !important;
+  box-shadow: 0 0 6px rgba(129,199,132,0.85) !important;
+}
 @keyframes count-flash { 0% { transform: scale(1.4); box-shadow: 0 0 12px #2196f3; } 100% { transform: scale(1); box-shadow: none; } }
 
 /* ── 牌 (画像) ─── */
