@@ -454,6 +454,16 @@ body {
 .toast[hidden] { display: none; }
 @keyframes toast-in { from { opacity: 0; transform: translate(-50%, -10px); } to { opacity: 1; transform: translate(-50%, 0); } }
 
+/* ── AI採点コーチ (打牌の即時評価バナー — toast の下に積む) ── */
+.coach-banner { position: fixed; top: 160px; left: 50%; transform: translateX(-50%); background: rgba(13, 42, 26, 0.95); border: 1px solid #4a6; color: #e8f2e8; padding: 7px 14px; border-radius: 10px; font-size: 12px; max-width: min(92vw, 480px); text-align: center; line-height: 1.55; z-index: 49; animation: toast-in 0.2s; pointer-events: none; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4); }
+.coach-banner[hidden] { display: none; }
+.coach-grade { font-weight: bold; font-size: 14px; }
+.coach-grade--best { color: #ffeb3b; }
+.coach-grade--good { color: #81c784; }
+.coach-grade--ok { color: #ffb74d; }
+.coach-grade--bad { color: #ff8a80; }
+.coach-safety { display: block; font-size: 11px; color: #cde; margin-top: 2px; }
+
 /* ── 局終了モーダル ── */
 .end-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 100; }
 .end-overlay[hidden] { display: none; }

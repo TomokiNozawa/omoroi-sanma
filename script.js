@@ -1226,6 +1226,127 @@ function waitsLabel(waits) {
   return waits.map(id => `${TILE_NAMES[id]}(残${Math.max(0, 4 - visibleCountOf(id))})`).join('・');
 }
 
+// ─── AI採点コーチ (打牌の即時評価 — シャンテン数+受け入れ枚数ベース) ──
+// 🎓トグルで ON/OFF (localStorage)。 net対戦でも自分の打牌のみを手元で評価 (他人には見えない)
+let coachOn = true;
+
+// 自分から見えている牌 (自手牌・全河・北抜き・副露・ドラ表示) を除いた残り枚数
+function coachRemainingOf(id) {
+  let seen = 0;
+  G.hands.bottom.forEach(t => { if (t && t.id === id) seen++; });
+  for (const s of ALL_SEATS) {
+    G.rivers[s].forEach(t => { if (t && t.id === id) seen++; });
+    (G.kitaTiles[s] || []).forEach(t => { if (t && t.id === id) seen++; });
+    (G.melds[s] || []).forEach(m => (m.tiles || []).forEach(t => { if (t && t.id === id) seen++; }));
+  }
+  if (G.doraIndicator && G.doraIndicator.id === id) seen++;
+  (G.kanDoraInd || []).forEach(t => { if (t && t.id === id) seen++; });
+  return Math.max(0, 4 - seen);
+}
+
+// 13枚形の受け入れ = シャンテンが進む牌の残り枚数合計 (北は北抜き前提のため対象外)
+function coachUkeire(hand13, melds) {
+  const base = shantenOf(hand13.concat(melds));
+  let total = 0;
+  const ids = [];
+  for (let id = 0; id < 27; id++) {
+    if (id === KITA_ID) continue;
+    if (shantenOf(hand13.concat(melds, [{ id, copy: 0, isRed: false }])) < base) {
+      const r = coachRemainingOf(id);
+      if (r > 0) { total += r; ids.push(id); }
+    }
+  }
+  return { shanten: base, total, ids };
+}
+
+// 守備評価: 他家リーチに対する 打牌の安全度 (現物 > 字牌 > スジ > 無スジ)
+function coachSafety(tile) {
+  const riichiSeats = ALL_SEATS.filter(s => s !== 'bottom' && s !== G.emptySeat && G.isRiichi[s]);
+  if (riichiSeats.length === 0) return null;
+  if (riichiSeats.every(s => G.rivers[s].some(t => t.id === tile.id))) {
+    return '🛡 <b>現物</b> — リーチに対して安全です';
+  }
+  if (isJihaiId(tile.id)) {
+    return coachRemainingOf(tile.id) <= 1
+      ? '🛡 字牌 (残りわずか) — 比較的安全'
+      : '⚠️ 字牌 — 単騎・シャンポン待ちには注意';
+  }
+  const n = tileNum(tile.id);
+  if (n != null && (isPinId(tile.id) || isSouId(tile.id))) {
+    const base = isPinId(tile.id) ? 1 : 10;  // id = base + 数字
+    const sujiOk = riichiSeats.every(s => {
+      const riv = new Set(G.rivers[s].map(t => t.id));
+      if (n <= 3) return riv.has(base + n + 3);
+      if (n >= 7) return riv.has(base + n - 3);
+      return riv.has(base + n - 3) && riv.has(base + n + 3);
+    });
+    if (sujiOk) return '🔶 スジ — 両面待ちには当たりにくい牌です (単騎等は注意)';
+  }
+  return '⚠️ <b>無スジ</b> — リーチに危険な牌です';
+}
+
+// 打牌評価本体: 実際に捨てる直前 (手牌14枚のうち) に呼ぶ。
+// リーチ確定後のツモ切りは選択の余地がないため対象外
+function coachEvaluateDiscard(tile) {
+  if (!coachOn || G.roundOver) return;
+  if (G.isRiichi.bottom && G.justRiichiDeclared !== 'bottom') return;
+  try {
+    const hand14 = G.hands.bottom;
+    const melds = meldTriples('bottom');
+    const evals = hand14.map(t => ({ t, sh: shantenOf(hand14.filter(x => x !== t).concat(melds)) }));
+    const minSh = Math.min(...evals.map(e => e.sh));
+    const chosen = evals.find(e => e.t === tile);
+    if (!chosen) return;
+    // 最小シャンテン候補の受け入れ (牌idごとに1回だけ計算)
+    const ukeCache = {};
+    const ukeOf = (t) => {
+      if (!(t.id in ukeCache)) ukeCache[t.id] = coachUkeire(hand14.filter(x => x !== t), melds);
+      return ukeCache[t.id];
+    };
+    let grade, msg;
+    const selName = TILE_NAMES[tile.id];
+    if (chosen.sh > minSh) {
+      const bests = evals.filter(e => e.sh === minSh);
+      const best = bests.reduce((a, b) => (ukeOf(b.t).total > ukeOf(a.t).total ? b : a), bests[0]);
+      const bn = TILE_NAMES[best.t.id];
+      msg = minSh === 0
+        ? `もったいない — <b>${bn}</b>切りなら テンパイでした`
+        : `もったいない — <b>${bn}</b>切りなら テンパイまで あと${minSh}枚 (${selName}切りは あと${chosen.sh}枚)`;
+      grade = ['✖', 'bad'];
+    } else {
+      const myUke = ukeOf(tile);
+      const bestTotal = Math.max(...evals.filter(e => e.sh === minSh).map(e => ukeOf(e.t).total));
+      if (minSh === 0) {
+        const waits = waitingIds(hand14.filter(x => x !== tile), melds);
+        const wLabel = waits.map(id => TILE_NAMES[id]).join('・');
+        if (myUke.total >= bestTotal) { grade = ['◎', 'best']; msg = `最善! テンパイ — 待ち: ${wLabel} (残${myUke.total}枚)`; }
+        else { grade = ['○', 'good']; msg = `テンパイ — 待ち: ${wLabel} (残${myUke.total}枚)。 より広い待ちもありました (最大${bestTotal}枚)`; }
+      } else if (myUke.total >= bestTotal) {
+        grade = ['◎', 'best']; msg = `最善です! 受け入れ${myUke.total}枚`;
+      } else if (bestTotal - myUke.total <= 4) {
+        grade = ['○', 'good']; msg = `いい選択 (受け入れ${myUke.total}枚 / 最大${bestTotal}枚)`;
+      } else {
+        const best = evals.filter(e => e.sh === minSh).reduce((a, b) => (ukeOf(b.t).total > ukeOf(a.t).total ? b : a));
+        grade = ['△', 'ok']; msg = `おしい — <b>${TILE_NAMES[best.t.id]}</b>切りなら受け入れ${bestTotal}枚 (今回${myUke.total}枚)`;
+      }
+    }
+    let html = `<span class="coach-grade coach-grade--${grade[1]}">${grade[0]}</span> ${msg}`;
+    const safety = coachSafety(tile);
+    if (safety) html += `<span class="coach-safety">${safety}</span>`;
+    showCoach(html);
+  } catch (e) { /* 評価失敗でもゲームは止めない */ }
+}
+
+let _coachTimer = null;
+function showCoach(html) {
+  const el = document.getElementById('coach-banner');
+  if (!el) return;
+  el.innerHTML = '🎓 ' + html;
+  el.hidden = false;
+  if (_coachTimer) clearTimeout(_coachTimer);
+  _coachTimer = setTimeout(() => { el.hidden = true; }, 4500);
+}
+
 // ─── リーチ中の待ち牌ガイド (雀魂式: 牌画像+残り枚数を 手牌の上に常時表示) ──
 function renderRiichiGuide() {
   const el = document.getElementById('riichi-guide');
@@ -2889,6 +3010,26 @@ if (document.getElementById('table')) {
         else playVoice('on');
       });
     }
+    // AI採点 ON/OFF トグル (端末ごとの表示設定なので localStorage 保持、 既定ON)
+    coachOn = localStorage.getItem('omoroi-coach') !== '0';
+    const coachBtn = document.getElementById('coach-btn');
+    if (coachBtn) {
+      const paintCoach = () => {
+        coachBtn.style.opacity = coachOn ? '1' : '0.35';
+        coachBtn.title = `AI採点 ${coachOn ? 'ON' : 'OFF'} — 打牌のたびに一言評価`;
+      };
+      paintCoach();
+      coachBtn.addEventListener('click', () => {
+        coachOn = !coachOn;
+        localStorage.setItem('omoroi-coach', coachOn ? '1' : '0');
+        paintCoach();
+        toast(coachOn ? '🎓 AI採点 ON — 打牌のたびに評価します' : '🎓 AI採点 OFF');
+        if (!coachOn) {
+          const cb = document.getElementById('coach-banner');
+          if (cb) cb.hidden = true;
+        }
+      });
+    }
     document.getElementById('guide-next')?.addEventListener('click', () => {
       guideIdx++;
       if (guideIdx >= GUIDE_STEPS.length) finishGuide();
@@ -2907,6 +3048,8 @@ if (document.getElementById('table')) {
           return;
         }
       }
+      // AI採点: 捨てる直前の手牌14枚で評価 (🎓トグルON時のみ)
+      coachEvaluateDiscard(tile);
       // net対戦ゲスト: アクション送信のみ (ホストが適用して状態が返る)
       if (NETQ() && NETQ().isGuest()) { NETQ().sendDiscard(tile); return; }
       discardTile('bottom', tile);
