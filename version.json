@@ -1,8 +1,8 @@
 {
   "data": {
-    "version": "0.9.2a",
+    "version": "0.9.2",
     "phase": 2,
-    "lastDevSuffix": "a"
+    "lastDevSuffix": ""
   },
   "scheduledRelease": null
 }
