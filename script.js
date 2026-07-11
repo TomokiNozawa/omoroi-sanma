@@ -52,6 +52,10 @@ const G = {
   kingUsedCells: [],   // 嶺上消費済セル (表示 hidden 用)
   kanDoraCells: [],    // めくり済カンドラの表示セル (王牌内で表向き表示)
   doraIndicator: null,
+  uraIndicator: null,  // 裏ドラ表示牌 (ホスト専有、 ゲストには配信しない)
+  diceD1: 0,
+  diceD2: 0,
+  ceremonyActive: false,
   startSeat: null,
   cutPosInStart: 0,  // = サイコロ目X (= カット位置 = 該当家山の右端からX幢目)
   diceTotal: 0,
@@ -1093,21 +1097,24 @@ function renderWalls() {
         const isDora = (seat === doraSeat && douIdx === doraDouIdx && dan === 'top');
         const kanDoraTile = kanDoraCellMap[key];
 
-        if (isDora) {
+        // ゲスト: サイコロ儀式のめくり演出が終わるまで 王牌の紫・ドラ表示を隠す (先見え防止、
+        // ホストと同じく「数えて→カットして→めくる」演出の後に初めて見える)
+        const revealPending = !!G._doraRevealPending;
+        if (isDora && !revealPending) {
           t.classList.add('wall-tile--dora');
           if (G.doraIndicator) {
             const fn = TILE_IMG[G.doraIndicator.id];
             if (fn) t.style.backgroundImage = `url('assets/${encodeURIComponent(fn)}')`;
             t.title = 'ドラ表示: ' + TILE_NAMES[G.doraIndicator.id];
           }
-        } else if (kanDoraTile) {
+        } else if (kanDoraTile && !revealPending) {
           // カンドラ表示牌: ドラ表示の隣で表向き (カンのたびに1枚ずつ増える)
           t.classList.add('wall-tile--dora', 'wall-tile--kandora');
           const fn = TILE_IMG[kanDoraTile.id];
           if (fn) t.style.backgroundImage = `url('assets/${encodeURIComponent(fn)}')`;
           t.title = 'カンドラ表示: ' + TILE_NAMES[kanDoraTile.id];
         } else if (isK) {
-          t.classList.add('wall-tile--king');
+          if (!revealPending) t.classList.add('wall-tile--king');
           if (kingConsumedSet.has(key)) t.style.visibility = 'hidden';  // 嶺上消費済
         } else {
           // 自摸山: 消費済は hidden
@@ -1409,6 +1416,8 @@ function kifuStartRound() {
   KIFU.steps = [];
   KIFU.active = true;
   KIFU.lastSaved = null;
+  const endKifuBtn = document.getElementById('end-kifu');
+  if (endKifuBtn) endKifuBtn.hidden = true;
 }
 
 // 自分の打牌1手を記録 (捨てる直前の状態スナップショット)。 auto = リーチ後の自動ツモ切り
@@ -1649,9 +1658,13 @@ function kifuRenderStep() {
   let dealinHtml = '';
   const isDealinStep = (entry.type === 'dealin' && idx === entry.steps.length - 1);
   if (isDealinStep) {
+    const chosenId = (step.hand[step.chosenIdx] || {}).id;
+    const autoDealt = (s.winTileId != null && chosenId !== s.winTileId);  // 記録外のリーチ自動ツモ切り等で放銃
     dealinHtml = '<div class="kifu-dealin">';
     if (s.chankan) {
       dealinHtml += `<b>💥 搶槓されました</b> — 加槓した牌 (${s.winTileId != null ? TILE_NAMES[s.winTileId] : '?'}) を ${s.winnerLabel || '他家'} がロン。 ポン済みの牌で他家がテンパイしていそうな時の加槓は要注意です。`;
+    } else if (autoDealt) {
+      dealinHtml += `<b>💥 ${TILE_NAMES[s.winTileId]} で ${s.winnerLabel || '他家'} に放銃</b> (${s.tier || ''} — リーチ後の自動ツモ切りなど、 この記録の後の打牌でした)`;
     } else {
       dealinHtml += `<b>💥 この1打で ${s.winnerLabel || '他家'} に放銃</b> (${s.tier || ''}${s.yaku && s.yaku.length ? ' — ' + s.yaku.slice(0, 4).join('・') : ''})`;
       if (s.winnerSeat && step.rivers[s.winnerSeat]) {
@@ -2680,20 +2693,24 @@ function showWinModal(seat, hand, context, result) {
   if (!overlay || !titleEl || !textEl) return;
   G.roundOver = true;
   G.busy = true;
-  // 牌譜: 自分のあがり局 or 振り込んだ局を保存 (📖ふりかえり用)
+  // 牌譜: 自分のあがり局 or 振り込んだ局を保存 (📖ふりかえり用)。
+  // netSummary は net対戦の pub にも載せて ゲスト側の牌譜保存にも使う (座席は canonical)
+  let kifuNetSummary = null;
   try {
+    kifuNetSummary = {
+      winnerSeat: seat, fromSeat: context.fromSeat || null,
+      winnerLabel: seatShareLabel(seat),
+      winType: context.isTsumo ? 'ツモ' : 'ロン',
+      han: result.han, isYakuman: result.isYakuman,
+      tier: hanToTier(result.han, result.isYakuman),
+      yaku: (result.yakuList || []).map(y => y.name),
+      winTileId: context.winTile ? context.winTile.id : null,
+      winnerHand: hand ? sortHand(hand.filter(t => t && t.id != null)).map(t => t.id) : [],
+      chankan: !!context.isChankan,
+    };
     const kType = (seat === 'bottom') ? 'win' : (context.fromSeat === 'bottom' ? 'dealin' : null);
     if (kType) {
-      kifuFinishRound(kType, {
-        winnerSeat: seat, winnerLabel: seatShareLabel(seat),
-        winType: context.isTsumo ? 'ツモ' : 'ロン',
-        han: result.han, isYakuman: result.isYakuman,
-        tier: hanToTier(result.han, result.isYakuman),
-        yaku: (result.yakuList || []).map(y => y.name),
-        winTileId: context.winTile ? context.winTile.id : null,
-        winnerHand: (seat !== 'bottom' && hand) ? sortHand(hand.filter(t => t && t.id != null)).map(t => t.id) : [],
-        chankan: !!context.isChankan,
-      });
+      kifuFinishRound(kType, kifuNetSummary);
       const kifuBtn = document.getElementById('end-kifu');
       if (kifuBtn && KIFU.lastSaved) kifuBtn.hidden = false;
     }
@@ -2865,8 +2882,8 @@ function showWinModal(seat, hand, context, result) {
     textEl.innerHTML = html;
     renderAll();  // ラベル点数更新 (「盤面を見る」用)
     overlay.hidden = false;
-    // net対戦ホスト: 結果をゲストへ配信 (ゲストにも同じ間で届く)
-    if (NETQ()) NETQ().onWinModal(titleEl.textContent, html);
+    // net対戦ホスト: 結果をゲストへ配信 (ゲストにも同じ間で届く、 sum はゲストの牌譜保存用)
+    if (NETQ()) NETQ().onWinModal(titleEl.textContent, html, kifuNetSummary);
 
     // タブ クリック
     document.querySelectorAll('.win-tab').forEach(btn => {
@@ -3000,9 +3017,7 @@ function startNewRound() {
   if (nextBtn) nextBtn.style.display = '';
   const peekReturn = document.getElementById('peek-return');
   if (peekReturn) peekReturn.hidden = true;
-  kifuStartRound();  // 牌譜: 新しい局の記録開始
-  const endKifuBtn = document.getElementById('end-kifu');
-  if (endKifuBtn) endKifuBtn.hidden = true;
+  kifuStartRound();  // 牌譜: 新しい局の記録開始 (📖ボタンも隠す)
   if (NETQ()) NETQ().onNewRound();  // net対戦: endInfo クリア
   renderAll();
 
@@ -3128,6 +3143,7 @@ async function showDiceCeremony(preset) {
     await sleep(380);
   }
   await sleep(500);
+  G._doraRevealPending = false;  // めくり演出の瞬間 — ここで初めてドラ表示牌を公開 (ゲスト先見え防止)
   renderWalls();  // 王牌 (紫) + ドラ表示牌 (表向き) を 山に反映
   titleEl.textContent = '✨ 王牌+ドラ表示 決定!';
   explainEl.textContent = `紫の 7幢 (14牌) が王牌。 その中央で 表向きになっている牌が ドラ表示です。`;
@@ -3147,6 +3163,10 @@ function closeGuestCeremony() {
   if (ov) ov.hidden = true;
   G._guestCeremonyAnimDone = false;
   G._guestCeremonyCloseWanted = false;
+  if (G._doraRevealPending) {  // 演出スキップ時もここでドラ公開 (安全網)
+    G._doraRevealPending = false;
+    renderWalls();
+  }
 }
 
 function closeDiceCeremony() {

@@ -505,12 +505,12 @@ const NetGame = (() => {
   }
 
   // ─── ホスト: 局終了/次局 フック ─────────────────
-  function onWinModal(title, html) {
+  function onWinModal(title, html, sum) {
     if (!isHost()) return;
     clearTimeout(S.turnTimer);
     clearTimeout(S.offerTimer);
     S.pendingOffer = null;
-    S.endInfo = { kind: 'win', title, html };
+    S.endInfo = { kind: 'win', title, html, sum: sum || null };
     publish();
   }
   function onEndRound(title, html) {
@@ -611,6 +611,8 @@ const NetGame = (() => {
       S.seenCeremony = pub.ceremonySeq;
       G._guestCeremonyAnimDone = false;
       G._guestCeremonyCloseWanted = false;
+      G._doraRevealPending = true;   // 儀式のめくり演出までドラ表示牌を伏せる (先見え防止)
+      kifuStartRound();              // ゲストの牌譜: 新しい局の記録開始
       setTimeout(() => showDiceCeremony({ guest: true, d1: pub.dice[0], d2: pub.dice[1] }), 200);
     } else if (pub.phase !== 'dice') {
       // ホストが配牌 → ゲスト儀式はアニメ完了を待って閉じる
@@ -656,6 +658,7 @@ const NetGame = (() => {
     }
     G.hands.bottom = h.tiles || [];
     G.justDrawn = (h.justDrawn != null) ? h.justDrawn : null;
+    G.justDrawnAll.bottom = G.justDrawn;  // リーチ中の暗槓候補等がツモ牌を参照できるように
     renderAll();
   }
   function showGuestEnd(info) {
@@ -665,6 +668,20 @@ const NetGame = (() => {
       + '<p style="font-size:11px; color:#aac; margin-top:8px;">⏳ ホストが次へ進めるのを待っています…</p>';
     const nextBtn = document.getElementById('end-next');
     if (nextBtn) nextBtn.style.display = 'none';
+    // ゲストの牌譜保存: sum (canonical座席) を自分視点に回転して あがり/振込を判定
+    try {
+      if (info.kind === 'win' && info.sum && KIFU.active && KIFU.steps.length > 0) {
+        const k = S.rot;
+        const wSeat = rotSeat(info.sum.winnerSeat, k);
+        const fSeat = rotSeat(info.sum.fromSeat, k);
+        const type = (wSeat === 'bottom') ? 'win' : (fSeat === 'bottom' ? 'dealin' : null);
+        if (type) {
+          kifuFinishRound(type, { ...info.sum, winnerSeat: wSeat, fromSeat: fSeat });
+          const kifuBtn = document.getElementById('end-kifu');
+          if (kifuBtn && KIFU.lastSaved) kifuBtn.hidden = false;
+        }
+      }
+    } catch (e) { /* 牌譜失敗でも表示は続行 */ }
     overlay.hidden = false;
   }
 
