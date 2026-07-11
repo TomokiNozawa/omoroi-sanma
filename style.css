@@ -103,21 +103,21 @@ body {
   grid-template-columns: repeat(6, auto);
   grid-template-rows: repeat(3, auto);
 }
-/* 側面の河: モバイルは 2列×9行 (幅を絞って山と非重複)、 PC は 3列×6行
+/* 側面の河: 全デバイス 実卓と同じ 6枚/段 (= 6行×3列)
    牌は 本人にとって正しい向きに回転: 上家=+90° / 下家=-90°。
    回転で縦横が入れ替わるため、 margin で レイアウト箱を横長に補正する
-   (モバイル: 牌16×21 → 箱21×16 / PC: 牌22×29 → 箱29×22) */
+   (モバイル: 牌15×20 → 箱20×15 / PC: 牌22×29 → 箱29×22) */
 .river-area--left, .river-area--right {
-  grid-template-rows: repeat(9, auto);
-  grid-template-columns: repeat(2, auto);
+  grid-template-rows: repeat(6, auto);
+  grid-template-columns: repeat(3, auto);
   grid-auto-flow: column;
   gap: 1px;
   padding: 1px;  /* モバイル360pxで 山と接触しないよう最小化 */
 }
 .river-area--left .tile--river, .river-area--right .tile--river {
-  width: 15px;
-  height: 20px;
-  margin: -2.5px 2.5px;  /* 回転後のレイアウト箱 = 20×15 */
+  width: 12px;
+  height: 16px;
+  margin: -2px 2px;  /* 回転後のレイアウト箱 = 16×12 (6枚/段×3列を 360px の山〜中央の窓54pxに収める) */
 }
 .river-area--left .tile { transform: rotate(90deg); }
 .river-area--right .tile { transform: rotate(-90deg); }
@@ -134,12 +134,12 @@ body {
   transform: translateX(-50%);
 }
 .river-area--left {
-  right: calc(50% + 61px);
+  right: calc(50% + 54px);
   top: 50%;
   transform: translateY(-50%);
 }
 .river-area--right {
-  left: calc(50% + 61px);
+  left: calc(50% + 54px);
   top: 50%;
   transform: translateY(-50%);
 }
@@ -468,6 +468,39 @@ body {
 .coach-grade--ok { color: #ffb74d; }
 .coach-grade--bad { color: #ff8a80; }
 .coach-safety { display: block; font-size: 11px; color: #cde; margin-top: 2px; }
+
+/* ── 牌譜ふりかえり (📖 ビューア — end-modal 派生でデザイン統一) ── */
+.kifu-modal { max-width: 420px; text-align: left; }
+.kifu-body { font-size: 12px; color: #dde; }
+.kifu-nav { display: flex; gap: 6px; margin-top: 8px; }
+.kifu-nav .kifu-btn { flex: 1; }
+.kifu-btn { min-height: 44px; }  /* モバイルタップ領域確保 */
+.kifu-dots { display: flex; flex-wrap: wrap; gap: 3px; justify-content: center; margin: 4px 0 8px; }
+.kifu-dot { width: 10px; height: 10px; border-radius: 50%; background: #345; display: inline-block; }
+.kifu-dot--best { background: #ffeb3b; }
+.kifu-dot--good { background: #81c784; }
+.kifu-dot--ok { background: #ffb74d; }
+.kifu-dot--bad { background: #ff8a80; }
+.kifu-dot--auto { background: #567; }
+.kifu-dot--cur { outline: 2px solid #fff; outline-offset: 1px; }
+.kifu-hand { background: rgba(0,0,0,0.35); padding: 8px 6px 4px; border-radius: 6px; text-align: center; line-height: 1.1; }
+.kifu-hand__note { font-size: 10px; color: #aac; margin-top: 4px; }
+.kifu-eval { background: rgba(13,42,26,0.9); border: 1px solid #4a6; border-radius: 8px; padding: 8px 10px; margin: 8px 0 6px; line-height: 1.55; }
+.kifu-info { font-size: 10px; color: #9ab; margin-bottom: 6px; }
+.kifu-dealin { background: rgba(198,40,40,0.15); border: 1px solid rgba(255,138,128,0.5); border-radius: 8px; padding: 8px 10px; margin-top: 6px; line-height: 1.6; font-size: 11px; }
+.kifu-win { background: rgba(255,235,59,0.12); border: 1px solid rgba(255,235,59,0.4); border-radius: 8px; padding: 8px 10px; margin-top: 6px; line-height: 1.6; font-size: 11px; }
+.kifu-mini-tiles { line-height: 1; }
+.kifu-list { max-height: 60vh; overflow-y: auto; }
+.kifu-section { font-size: 12px; color: #ffeb3b; margin: 10px 0 4px; font-weight: bold; }
+.kifu-empty { font-size: 11px; color: #789; margin: 2px 0 6px; }
+.kifu-note { font-size: 10px; color: #9ab; margin-top: 10px; }
+.kifu-row { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; box-sizing: border-box; margin: 3px 0; padding: 8px 10px; background: #143820; border: 1px solid #4a6; border-radius: 8px; color: #dde; cursor: pointer; font-size: 12px; text-align: left; }
+.kifu-row:hover { background: #1b4a2b; }
+.kifu-row__main { font-weight: bold; }
+.kifu-row__sub { font-size: 10px; color: #9ab; }
+.kifu-badge { font-size: 10px; padding: 1px 8px; border-radius: 10px; font-weight: bold; }
+.kifu-badge--win { background: rgba(255,235,59,0.2); color: #ffeb3b; border: 1px solid rgba(255,235,59,0.5); }
+.kifu-badge--dealin { background: rgba(198,40,40,0.25); color: #ff8a80; border: 1px solid rgba(255,138,128,0.5); }
 
 /* ── 局終了モーダル ── */
 .end-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 100; }

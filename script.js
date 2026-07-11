@@ -70,6 +70,9 @@ const G = {
   busy: false,
   // リーチ状態
   isRiichi: { bottom: false, right: false, top: false, left: false },
+  // ダブルリーチ (1巡目宣言)。 ⚠️ G リテラルに必須: net ゲストは startNewRound を実行しないため、
+  // ここに無いと updateActionButtons / ロン・ツモのハンドラが TypeError で沈黙する (v0.9.0〜の実バグ)
+  doubleRiichi: { bottom: false, right: false, top: false, left: false },
   riichiTurnsLeft: { bottom: 0, right: 0, top: 0, left: 0 }, // 一発カウント
   // 点数 (簡易: 各家 35000スタート、 三麻=3人 + 空席は0)
   scores: { bottom: 35000, right: 35000, top: 35000, left: 35000 },
@@ -1003,13 +1006,10 @@ function renderRiver(seat) {
   const container = document.getElementById(`river-${seat}`);
   if (!container) return;
   container.innerHTML = '';
-  const isPC = (typeof window !== 'undefined' && window.matchMedia)
-    ? window.matchMedia('(min-width: 640px)').matches : false;
   const arr = G.rivers[seat];
-  const horizontal = (seat === 'bottom' || seat === 'top');
-  // 横河: 6列×可変段 / 縦河: PC=6行×可変列、 モバイル=9行×可変列 (CSS grid と同値)
-  const perLine = horizontal ? 6 : (isPC ? 6 : 9);
-  const lines = Math.max(horizontal ? 3 : (isPC ? 3 : 2), Math.ceil(arr.length / perLine));
+  // 全席 実卓と同じ 6枚/段 (横河=6列×可変段、 縦河=6行×可変列。 CSS grid と同値)
+  const perLine = 6;
+  const lines = Math.max(3, Math.ceil(arr.length / perLine));
   arr.forEach((tile, i) => {
     const el = createTileEl(tile, { river: true });
     if (tile === G.lastDiscard) el.classList.add('tile--latest');
@@ -1288,80 +1288,101 @@ function coachUkeire(hand13, melds) {
   return { shanten: base, total, ids };
 }
 
-// 守備評価: 他家リーチに対する 打牌の安全度 (現物 > 字牌 > スジ > 無スジ)
-function coachSafety(tile) {
-  const riichiSeats = ALL_SEATS.filter(s => s !== 'bottom' && s !== G.emptySeat && G.isRiichi[s]);
-  if (riichiSeats.length === 0) return null;
-  if (riichiSeats.every(s => G.rivers[s].some(t => t.id === tile.id))) {
+// 守備評価コア (G非依存): リーチ中他家の河に対する 打牌の安全度 (現物 > 字牌 > スジ > 無スジ)
+// riichiRivers = リーチ中他家の河 (id配列の配列)、 remainOf(id) = 残枚数
+function coachSafetyCore(tile, riichiRivers, remainOf) {
+  if (!riichiRivers || riichiRivers.length === 0) return null;
+  if (riichiRivers.every(riv => riv.includes(tile.id))) {
     return '🛡 <b>現物</b> — リーチに対して安全です';
   }
   if (isJihaiId(tile.id)) {
-    return coachRemainingOf(tile.id) <= 1
+    return remainOf(tile.id) <= 1
       ? '🛡 字牌 (残りわずか) — 比較的安全'
       : '⚠️ 字牌 — 単騎・シャンポン待ちには注意';
   }
   const n = tileNum(tile.id);
   if (n != null && (isPinId(tile.id) || isSouId(tile.id))) {
     const base = isPinId(tile.id) ? 1 : 10;  // id = base + 数字
-    const sujiOk = riichiSeats.every(s => {
-      const riv = new Set(G.rivers[s].map(t => t.id));
-      if (n <= 3) return riv.has(base + n + 3);
-      if (n >= 7) return riv.has(base + n - 3);
-      return riv.has(base + n - 3) && riv.has(base + n + 3);
+    const sujiOk = riichiRivers.every(riv => {
+      const rs = new Set(riv);
+      if (n <= 3) return rs.has(base + n + 3);
+      if (n >= 7) return rs.has(base + n - 3);
+      return rs.has(base + n - 3) && rs.has(base + n + 3);
     });
     if (sujiOk) return '🔶 スジ — 両面待ちには当たりにくい牌です (単騎等は注意)';
   }
   return '⚠️ <b>無スジ</b> — リーチに危険な牌です';
 }
 
-// 打牌評価本体: 実際に捨てる直前 (手牌14枚のうち) に呼ぶ。
+// 解析コア (G非依存 — ライブ🎓と牌譜ふりかえりで共用):
+// hand14 = 手牌14枚相当 / melds3 = 副露の3枚等価 / tile = 検討する捨て牌 (hand14内のオブジェクト)
+// remainOf(id) = 残枚数取得 / riichiRivers = リーチ中他家の河 (id配列の配列)
+// 戻り値: { mark, cls, msg, safety } / null
+function coachAnalyzeCore(hand14, melds3, tile, remainOf, riichiRivers) {
+  const evals = hand14.map(t => ({ t, sh: shantenOf(hand14.filter(x => x !== t).concat(melds3)) }));
+  const minSh = Math.min(...evals.map(e => e.sh));
+  const chosen = evals.find(e => e.t === tile);
+  if (!chosen) return null;
+  // 受け入れ (牌idごとに1回だけ計算)
+  const ukeCache = {};
+  const ukeOf = (t) => {
+    if (!(t.id in ukeCache)) {
+      const hand13 = hand14.filter(x => x !== t);
+      const base = shantenOf(hand13.concat(melds3));
+      let total = 0;
+      for (let id = 0; id < 27; id++) {
+        if (id === KITA_ID) continue;
+        if (shantenOf(hand13.concat(melds3, [{ id, copy: 0, isRed: false }])) < base) {
+          total += Math.max(0, remainOf(id));
+        }
+      }
+      ukeCache[t.id] = { total };
+    }
+    return ukeCache[t.id];
+  };
+  let grade, msg;
+  const selName = TILE_NAMES[tile.id];
+  if (chosen.sh > minSh) {
+    const bests = evals.filter(e => e.sh === minSh);
+    const best = bests.reduce((a, b) => (ukeOf(b.t).total > ukeOf(a.t).total ? b : a), bests[0]);
+    const bn = TILE_NAMES[best.t.id];
+    msg = minSh === 0
+      ? `もったいない — <b>${bn}</b>切りなら テンパイでした`
+      : `もったいない — <b>${bn}</b>切りなら テンパイまで あと${minSh}枚 (${selName}切りは あと${chosen.sh}枚)`;
+    grade = ['✖', 'bad'];
+  } else {
+    const myUke = ukeOf(tile);
+    const bestTotal = Math.max(...evals.filter(e => e.sh === minSh).map(e => ukeOf(e.t).total));
+    if (minSh === 0) {
+      const waits = waitingIds(hand14.filter(x => x !== tile), melds3);
+      const wLabel = waits.map(id => TILE_NAMES[id]).join('・');
+      if (myUke.total >= bestTotal) { grade = ['◎', 'best']; msg = `最善! テンパイ — 待ち: ${wLabel} (残${myUke.total}枚)`; }
+      else { grade = ['○', 'good']; msg = `テンパイ — 待ち: ${wLabel} (残${myUke.total}枚)。 より広い待ちもありました (最大${bestTotal}枚)`; }
+    } else if (myUke.total >= bestTotal) {
+      grade = ['◎', 'best']; msg = `最善です! 受け入れ${myUke.total}枚`;
+    } else if (bestTotal - myUke.total <= 4) {
+      grade = ['○', 'good']; msg = `いい選択 (受け入れ${myUke.total}枚 / 最大${bestTotal}枚)`;
+    } else {
+      const best = evals.filter(e => e.sh === minSh).reduce((a, b) => (ukeOf(b.t).total > ukeOf(a.t).total ? b : a));
+      grade = ['△', 'ok']; msg = `おしい — <b>${TILE_NAMES[best.t.id]}</b>切りなら受け入れ${bestTotal}枚 (今回${myUke.total}枚)`;
+    }
+  }
+  return { mark: grade[0], cls: grade[1], msg, safety: coachSafetyCore(tile, riichiRivers, remainOf) };
+}
+
+// 打牌評価本体 (ライブ🎓): 実際に捨てる直前 (手牌14枚のうち) に呼ぶ。
 // リーチ確定後のツモ切りは選択の余地がないため対象外
 function coachEvaluateDiscard(tile) {
   if (!coachOn || G.roundOver) return;
   if (G.isRiichi.bottom && G.justRiichiDeclared !== 'bottom') return;
   try {
-    const hand14 = G.hands.bottom;
-    const melds = meldTriples('bottom');
-    const evals = hand14.map(t => ({ t, sh: shantenOf(hand14.filter(x => x !== t).concat(melds)) }));
-    const minSh = Math.min(...evals.map(e => e.sh));
-    const chosen = evals.find(e => e.t === tile);
-    if (!chosen) return;
-    // 最小シャンテン候補の受け入れ (牌idごとに1回だけ計算)
-    const ukeCache = {};
-    const ukeOf = (t) => {
-      if (!(t.id in ukeCache)) ukeCache[t.id] = coachUkeire(hand14.filter(x => x !== t), melds);
-      return ukeCache[t.id];
-    };
-    let grade, msg;
-    const selName = TILE_NAMES[tile.id];
-    if (chosen.sh > minSh) {
-      const bests = evals.filter(e => e.sh === minSh);
-      const best = bests.reduce((a, b) => (ukeOf(b.t).total > ukeOf(a.t).total ? b : a), bests[0]);
-      const bn = TILE_NAMES[best.t.id];
-      msg = minSh === 0
-        ? `もったいない — <b>${bn}</b>切りなら テンパイでした`
-        : `もったいない — <b>${bn}</b>切りなら テンパイまで あと${minSh}枚 (${selName}切りは あと${chosen.sh}枚)`;
-      grade = ['✖', 'bad'];
-    } else {
-      const myUke = ukeOf(tile);
-      const bestTotal = Math.max(...evals.filter(e => e.sh === minSh).map(e => ukeOf(e.t).total));
-      if (minSh === 0) {
-        const waits = waitingIds(hand14.filter(x => x !== tile), melds);
-        const wLabel = waits.map(id => TILE_NAMES[id]).join('・');
-        if (myUke.total >= bestTotal) { grade = ['◎', 'best']; msg = `最善! テンパイ — 待ち: ${wLabel} (残${myUke.total}枚)`; }
-        else { grade = ['○', 'good']; msg = `テンパイ — 待ち: ${wLabel} (残${myUke.total}枚)。 より広い待ちもありました (最大${bestTotal}枚)`; }
-      } else if (myUke.total >= bestTotal) {
-        grade = ['◎', 'best']; msg = `最善です! 受け入れ${myUke.total}枚`;
-      } else if (bestTotal - myUke.total <= 4) {
-        grade = ['○', 'good']; msg = `いい選択 (受け入れ${myUke.total}枚 / 最大${bestTotal}枚)`;
-      } else {
-        const best = evals.filter(e => e.sh === minSh).reduce((a, b) => (ukeOf(b.t).total > ukeOf(a.t).total ? b : a));
-        grade = ['△', 'ok']; msg = `おしい — <b>${TILE_NAMES[best.t.id]}</b>切りなら受け入れ${bestTotal}枚 (今回${myUke.total}枚)`;
-      }
-    }
-    let html = `<span class="coach-grade coach-grade--${grade[1]}">${grade[0]}</span> ${msg}`;
-    const safety = coachSafety(tile);
-    if (safety) html += `<span class="coach-safety">${safety}</span>`;
+    const riichiRivers = ALL_SEATS
+      .filter(s => s !== 'bottom' && s !== G.emptySeat && G.isRiichi[s])
+      .map(s => G.rivers[s].map(t => t.id));
+    const r = coachAnalyzeCore(G.hands.bottom, meldTriples('bottom'), tile, coachRemainingOf, riichiRivers);
+    if (!r) return;
+    let html = `<span class="coach-grade coach-grade--${r.cls}">${r.mark}</span> ${r.msg}`;
+    if (r.safety) html += `<span class="coach-safety">${r.safety}</span>`;
     showCoach(html);
   } catch (e) { /* 評価失敗でもゲームは止めない */ }
 }
@@ -1374,6 +1395,315 @@ function showCoach(html) {
   el.hidden = false;
   if (_coachTimer) clearTimeout(_coachTimer);
   _coachTimer = setTimeout(() => { el.hidden = true; }, 4500);
+}
+
+// ============================================================
+// 牌譜ふりかえり (局の全手順を記録 → コーチエンジンで全手採点)
+//   保存: あがり局 直近3 + 振込局 直近3 (localStorage、 端末保持)
+//   ソロ/net ホストで記録 (net ゲストは v1 対象外)
+// ============================================================
+const KIFU_LS_KEY = 'omoroi-kifu-v1';
+const KIFU = { steps: [], active: false, lastSaved: null };
+
+function kifuStartRound() {
+  KIFU.steps = [];
+  KIFU.active = true;
+  KIFU.lastSaved = null;
+}
+
+// 自分の打牌1手を記録 (捨てる直前の状態スナップショット)。 auto = リーチ後の自動ツモ切り
+function kifuRecordStep(tile, opts = {}) {
+  if (!KIFU.active || G.roundOver) return;
+  try {
+    const meldsSnap = {};
+    ALL_SEATS.forEach(s => { meldsSnap[s] = (G.melds[s] || []).map(m => ({ type: m.type, id: m.id, n: m.tiles.length })); });
+    KIFU.steps.push({
+      hand: G.hands.bottom.map(t => ({ id: t.id, isRed: !!t.isRed })),
+      drawnIdx: (G.justDrawn != null) ? G.justDrawn : null,
+      chosenIdx: G.hands.bottom.indexOf(tile),
+      auto: !!opts.auto,
+      declaring: G.justRiichiDeclared === 'bottom',
+      myRiichi: G.isRiichi.bottom,
+      riichi: ALL_SEATS.filter(s => s !== 'bottom' && s !== G.emptySeat && G.isRiichi[s]),
+      rivers: Object.fromEntries(ALL_SEATS.map(s => [s, G.rivers[s].map(t => t.id)])),
+      kitas: Object.fromEntries(ALL_SEATS.map(s => [s, (G.kitaTiles[s] || []).map(t => t.id)])),
+      melds: meldsSnap,
+      doraInd: G.doraIndicator ? G.doraIndicator.id : null,
+      kanDora: (G.kanDoraInd || []).map(t => t.id),
+      remain: G.drawTiles.length,
+    });
+  } catch (e) { /* 記録失敗でもゲームは止めない */ }
+}
+
+function kifuLoad() {
+  try {
+    const j = JSON.parse(localStorage.getItem(KIFU_LS_KEY) || '{}');
+    return { wins: j.wins || [], dealins: j.dealins || [] };
+  } catch (e) { return { wins: [], dealins: [] }; }
+}
+
+// 局終了時に保存 (showWinModal から): type = 'win' | 'dealin'
+function kifuFinishRound(type, summary) {
+  if (!KIFU.active || KIFU.steps.length === 0) return;
+  KIFU.active = false;  // 二重保存防止
+  try {
+    const entry = { ts: Date.now(), round: G.round, honba: G.honba, type, summary, steps: KIFU.steps };
+    const store = kifuLoad();
+    const key = type === 'win' ? 'wins' : 'dealins';
+    store[key].push(entry);
+    store[key] = store[key].slice(-3);  // 直近3局のみ保持
+    localStorage.setItem(KIFU_LS_KEY, JSON.stringify(store));
+    KIFU.lastSaved = entry;
+  } catch (e) { /* 保存失敗でもゲームは止めない */ }
+}
+
+// ─── 牌譜: 1手の再採点 (スナップショットから コーチコアを再実行) ───
+function kifuEvalStep(step) {
+  // 見えていた牌 → 残枚数
+  const seen = {};
+  const add = (id) => { seen[id] = (seen[id] || 0) + 1; };
+  step.hand.forEach(h => add(h.id));
+  for (const s of ALL_SEATS) {
+    (step.rivers[s] || []).forEach(add);
+    (step.kitas[s] || []).forEach(add);
+    (step.melds[s] || []).forEach(m => { for (let k = 0; k < m.n; k++) add(m.id); });
+  }
+  if (step.doraInd != null) add(step.doraInd);
+  (step.kanDora || []).forEach(add);
+  const remainOf = (id) => Math.max(0, 4 - (seen[id] || 0));
+  const hand14 = step.hand.map((h, i) => ({ id: h.id, copy: i, isRed: h.isRed }));
+  const tile = hand14[step.chosenIdx];
+  const melds3 = (step.melds.bottom || [])
+    .flatMap(m => [0, 1, 2].map(k => ({ id: m.id, copy: 100 + k, isRed: false })));
+  const riichiRivers = (step.riichi || []).map(s => step.rivers[s] || []);
+  if (!tile) return null;
+  if (step.auto) {
+    // リーチ後の自動ツモ切り: 採点対象外、 安全度情報のみ
+    return { mark: '🔒', cls: 'auto', msg: 'リーチ後の自動ツモ切り (選択の余地なし)',
+             safety: coachSafetyCore(tile, riichiRivers, remainOf) };
+  }
+  return coachAnalyzeCore(hand14, melds3, tile, remainOf, riichiRivers);
+}
+
+// ─── 牌譜ビューア (リザルト/ロビー共用のオーバーレイ、 Esc/←→/Tabトラップ対応) ───
+let _kifuView = null;  // { entry, idx, evals, fromList }
+function kifuEnsureOverlay() {
+  let ov = document.getElementById('kifu-overlay');
+  if (ov) return ov;
+  ov = document.createElement('div');
+  ov.id = 'kifu-overlay';
+  ov.className = 'end-overlay';  // 既存モーダルとデザイン統一
+  ov.hidden = true;
+  ov.innerHTML = `
+    <div class="end-modal kifu-modal">
+      <h2 class="end-modal__title" id="kifu-title">📖 牌譜ふりかえり</h2>
+      <div id="kifu-body" class="kifu-body"></div>
+      <div class="kifu-nav" id="kifu-stepnav">
+        <button class="end-modal__btn end-modal__btn--secondary kifu-btn" id="kifu-prev">◀ 前へ</button>
+        <button class="end-modal__btn end-modal__btn--secondary kifu-btn" id="kifu-bad" title="次の △/✖ の手へジャンプ">△✖へ</button>
+        <button class="end-modal__btn kifu-btn" id="kifu-next">次へ ▶</button>
+      </div>
+      <div class="kifu-nav">
+        <button class="end-modal__btn end-modal__btn--secondary kifu-btn" id="kifu-back">閉じる</button>
+      </div>
+    </div>`;
+  document.body.appendChild(ov);
+  document.getElementById('kifu-prev').addEventListener('click', () => kifuStepMove(-1));
+  document.getElementById('kifu-next').addEventListener('click', () => kifuStepMove(1));
+  document.getElementById('kifu-bad').addEventListener('click', kifuJumpBad);
+  document.getElementById('kifu-back').addEventListener('click', kifuBack);
+  return ov;
+}
+function kifuClose() {
+  const ov = document.getElementById('kifu-overlay');
+  if (ov) ov.hidden = true;
+  _kifuView = null;
+}
+function kifuBack() {
+  if (_kifuView && _kifuView.fromList) kifuOpenList();
+  else kifuClose();
+}
+function kifuStepMove(d) {
+  if (!_kifuView || !_kifuView.entry) return;
+  const n = _kifuView.entry.steps.length;
+  _kifuView.idx = Math.min(n - 1, Math.max(0, _kifuView.idx + d));
+  kifuRenderStep();
+}
+function kifuJumpBad() {
+  if (!_kifuView || !_kifuView.entry) return;
+  const { evals, idx } = _kifuView;
+  for (let i = 1; i <= evals.length; i++) {
+    const j = (idx + i) % evals.length;
+    const e = evals[j];
+    if (e && (e.cls === 'ok' || e.cls === 'bad')) { _kifuView.idx = j; kifuRenderStep(); return; }
+  }
+  toast('△✖の手はありません — 全手ナイス打牌!');
+}
+
+// 牌譜一覧 (ロビー/ゲーム共通)
+function kifuOpenList() {
+  const ov = kifuEnsureOverlay();
+  const store = kifuLoad();
+  const fmt = (ts) => {
+    const d = new Date(ts);
+    const z = (x) => String(x).padStart(2, '0');
+    return `${z(d.getMonth() + 1)}/${z(d.getDate())} ${z(d.getHours())}:${z(d.getMinutes())}`;
+  };
+  const row = (e, i, key) => {
+    const s = e.summary || {};
+    const badge = e.type === 'win'
+      ? `<span class="kifu-badge kifu-badge--win">🏆 あがり</span>`
+      : `<span class="kifu-badge kifu-badge--dealin">💥 振込</span>`;
+    const desc = e.type === 'win'
+      ? `${s.winType || ''} ${s.tier || ''} (${(s.yaku || []).slice(0, 3).join('・')}${(s.yaku || []).length > 3 ? '…' : ''})`
+      : `${s.winnerLabel || '他家'}に ${s.tier || ''} ${s.chankan ? '(搶槓)' : ''}`;
+    return `<button class="kifu-row kifu-btn" data-key="${key}" data-i="${i}">${badge}
+      <span class="kifu-row__main">${e.round}局${e.honba ? ` ${e.honba}本場` : ''} — ${desc}</span>
+      <span class="kifu-row__sub">${fmt(e.ts)} / ${e.steps.length}手</span></button>`;
+  };
+  const store2 = { wins: [...store.wins].reverse(), dealins: [...store.dealins].reverse() };  // 新しい順
+  let html = '<div class="kifu-list">';
+  html += '<p class="kifu-section">🏆 あがった局 (直近3局)</p>';
+  html += store2.wins.length ? store2.wins.map((e, i) => row(e, i, 'wins')).join('') : '<p class="kifu-empty">まだありません — あがるとここに残ります</p>';
+  html += '<p class="kifu-section">💥 振り込んだ局 (直近3局)</p>';
+  html += store2.dealins.length ? store2.dealins.map((e, i) => row(e, i, 'dealins')).join('') : '<p class="kifu-empty">まだありません — 振り込むとここに残ります</p>';
+  html += '<p class="kifu-note">各手順を 🎓コーチエンジンが再採点します (牌効率+安全度)。 ←→キー / ボタンで手順送り。</p>';
+  html += '</div>';
+  document.getElementById('kifu-title').textContent = '📖 牌譜ふりかえり';
+  document.getElementById('kifu-body').innerHTML = html;
+  document.getElementById('kifu-stepnav').hidden = true;
+  document.getElementById('kifu-back').textContent = '閉じる';
+  _kifuView = { list: store2 };
+  ov.hidden = false;
+  document.getElementById('kifu-body').querySelectorAll('.kifu-row').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const e = _kifuView.list[btn.dataset.key][Number(btn.dataset.i)];
+      if (e) kifuOpenViewer(e, true);
+    });
+  });
+}
+
+// 牌譜ビューア本体
+function kifuOpenViewer(entry, fromList = false) {
+  const ov = kifuEnsureOverlay();
+  // 全手を先に採点 (ドット色 + 悪手ジャンプ用)
+  const evals = entry.steps.map(st => { try { return kifuEvalStep(st); } catch (e) { return null; } });
+  _kifuView = { entry, evals, idx: 0, fromList };
+  // 振込局は 放銃の1打 (最終手) から開く
+  if (entry.type === 'dealin' && !entry.summary?.chankan) _kifuView.idx = entry.steps.length - 1;
+  document.getElementById('kifu-stepnav').hidden = false;
+  document.getElementById('kifu-back').textContent = fromList ? '← 一覧へ' : '閉じる';
+  ov.hidden = false;
+  kifuRenderStep();
+}
+
+function kifuRenderStep() {
+  if (!_kifuView || !_kifuView.entry) return;
+  const { entry, evals, idx } = _kifuView;
+  const step = entry.steps[idx];
+  const ev = evals[idx];
+  const s = entry.summary || {};
+  const typeBadge = entry.type === 'win'
+    ? '<span class="kifu-badge kifu-badge--win">🏆 あがり局</span>'
+    : '<span class="kifu-badge kifu-badge--dealin">💥 振込局</span>';
+  document.getElementById('kifu-title').innerHTML = `📖 ${entry.round}局${entry.honba ? ` ${entry.honba}本場` : ''} ${typeBadge}`;
+
+  // ドット (手順ごとの評価色、 現在手は枠)
+  let dots = '<div class="kifu-dots">';
+  evals.forEach((e, i) => {
+    const cls = e ? e.cls : 'auto';
+    dots += `<span class="kifu-dot kifu-dot--${cls}${i === idx ? ' kifu-dot--cur' : ''}"></span>`;
+  });
+  dots += '</div>';
+
+  // 手牌表示 (ソート + ツモ牌分離、 選択打牌を赤枠)
+  const hand14 = step.hand.map((h, i) => ({ ...h, _i: i }));
+  const drawn = (step.drawnIdx != null) ? hand14[step.drawnIdx] : null;
+  const rest = hand14.filter(h => h !== drawn).sort((a, b) => a.id - b.id);
+  const tileHtml = (h, extra = '') => tileSpanHtml({ id: h.id }, `width:20px; height:27px; ${h._i === step.chosenIdx ? 'box-shadow: 0 0 0 2px #f44336, 0 0 8px rgba(244,67,54,0.8);' : ''} ${extra}`);
+  let handHtml = '<div class="kifu-hand">';
+  handHtml += rest.map(h => tileHtml(h)).join('');
+  if (drawn) handHtml += '<span style="display:inline-block; width:8px;"></span>' + tileHtml(drawn);
+  handHtml += `<div class="kifu-hand__note">手順 ${idx + 1}/${entry.steps.length} — 赤枠 = 実際に切った牌${drawn ? ' / 右端 = ツモ牌' : ''}${step.declaring ? ' / 🔴リーチ宣言打' : ''}</div>`;
+  handHtml += '</div>';
+
+  // 評価ボックス
+  let evalHtml = '<div class="kifu-eval">';
+  if (ev) {
+    evalHtml += `<span class="coach-grade coach-grade--${ev.cls}">${ev.mark}</span> ${ev.msg}`;
+    if (ev.safety) evalHtml += `<span class="coach-safety">${ev.safety}</span>`;
+  } else {
+    evalHtml += '評価できませんでした';
+  }
+  evalHtml += '</div>';
+
+  // 状況情報 (ドラ/山残/リーチ者)
+  let infoHtml = '<div class="kifu-info">';
+  if (step.doraInd != null) infoHtml += `ドラ表示: ${TILE_NAMES[step.doraInd]}`;
+  if ((step.kanDora || []).length) infoHtml += ` / カンドラ表示: ${step.kanDora.map(id => TILE_NAMES[id]).join('・')}`;
+  infoHtml += ` / 山残 ${step.remain}`;
+  if ((step.riichi || []).length) infoHtml += ` / 🔴リーチ者: ${step.riichi.map(r => SEAT_LABEL_BASE[r]).join('・')}`;
+  infoHtml += '</div>';
+
+  // 振込局の最終手: 敗因分析パネル
+  let dealinHtml = '';
+  const isDealinStep = (entry.type === 'dealin' && idx === entry.steps.length - 1);
+  if (isDealinStep) {
+    dealinHtml = '<div class="kifu-dealin">';
+    if (s.chankan) {
+      dealinHtml += `<b>💥 搶槓されました</b> — 加槓した牌 (${s.winTileId != null ? TILE_NAMES[s.winTileId] : '?'}) を ${s.winnerLabel || '他家'} がロン。 ポン済みの牌で他家がテンパイしていそうな時の加槓は要注意です。`;
+    } else {
+      dealinHtml += `<b>💥 この1打で ${s.winnerLabel || '他家'} に放銃</b> (${s.tier || ''}${s.yaku && s.yaku.length ? ' — ' + s.yaku.slice(0, 4).join('・') : ''})`;
+      if (s.winnerSeat && step.rivers[s.winnerSeat]) {
+        const winnerRiver = new Set(step.rivers[s.winnerSeat]);
+        const safeIds = [...new Set(step.hand.map(h => h.id))].filter(id => winnerRiver.has(id));
+        dealinHtml += safeIds.length
+          ? `<br>🛡 この時 手牌にあった<b>現物 (振り込まなかった牌)</b>: ${safeIds.map(id => TILE_NAMES[id]).join('・')}`
+          : '<br>現物は手牌にありませんでした — 難しい局面でした';
+      }
+      if ((s.winnerHand || []).length) {
+        dealinHtml += `<br>相手の手: <span class="kifu-mini-tiles">${s.winnerHand.map(id => tileSpanHtml({ id }, 'width:18px; height:24px;')).join('')}</span>`;
+      }
+    }
+    dealinHtml += '</div>';
+  }
+  // あがり局の最終手: あがりサマリ
+  let winHtml = '';
+  if (entry.type === 'win' && idx === entry.steps.length - 1) {
+    winHtml = `<div class="kifu-win"><b>🏆 この局は ${s.winType || ''}あがり!</b> ${s.tier || ''}${s.yaku && s.yaku.length ? ' — ' + s.yaku.join('・') : ''}</div>`;
+  }
+
+  document.getElementById('kifu-body').innerHTML = dots + handHtml + evalHtml + infoHtml + dealinHtml + winHtml;
+  document.getElementById('kifu-prev').disabled = (idx === 0);
+  document.getElementById('kifu-next').disabled = (idx === entry.steps.length - 1);
+}
+
+// ロビーの 📖牌譜 ボタン (index.html)
+if (typeof document !== 'undefined' && document.addEventListener) {
+  const bindKifuLobby = () => document.getElementById('btn-kifu')?.addEventListener('click', kifuOpenList);
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bindKifuLobby);
+  else bindKifuLobby();
+}
+
+// キー操作 (capture: ゲーム側の ←→ より先に取り、 ビューア表示中はゲームへ通さない)
+if (typeof document !== 'undefined' && document.addEventListener) {
+  document.addEventListener('keydown', (e) => {
+    const ov = document.getElementById('kifu-overlay');
+    if (!ov || ov.hidden) return;
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); kifuClose(); }
+    else if (e.key === 'ArrowLeft') { e.preventDefault(); e.stopPropagation(); kifuStepMove(-1); }
+    else if (e.key === 'ArrowRight') { e.preventDefault(); e.stopPropagation(); kifuStepMove(1); }
+    else if (e.key === 'Tab') {
+      // フォーカストラップ: ビューア内のボタンのみ循環
+      const btns = Array.from(ov.querySelectorAll('button')).filter(b => !b.disabled && !b.hidden && b.offsetParent !== null);
+      if (btns.length) {
+        e.preventDefault(); e.stopPropagation();
+        const i = btns.indexOf(document.activeElement);
+        const ni = e.shiftKey ? (i <= 0 ? btns.length - 1 : i - 1) : (i < 0 || i === btns.length - 1 ? 0 : i + 1);
+        btns[ni].focus();
+      }
+    }
+  }, true);
 }
 
 // ─── リーチ中の待ち牌ガイド (雀魂式: 牌画像+残り枚数を 手牌の上に常時表示) ──
@@ -1731,8 +2061,10 @@ function canRinshanDraw() {
   return G.kingTiles.length > 0 && G.drawTiles.length > 0;
 }
 // カン可能条件: 嶺上補充可 + カンドラの残りめくり枠あり (王牌レイアウト上 1局最大3回)
+// ※ net ゲストは kanDoraDefs を持たない (ホスト専有) ため 空配列は既定値3枚にフォールバック
 function kanAllowed() {
-  return canRinshanDraw() && G.kanDoraInd.length < (G.kanDoraDefs ? G.kanDoraDefs.length : 3);
+  const max = (G.kanDoraDefs && G.kanDoraDefs.length > 0) ? G.kanDoraDefs.length : 3;
+  return canRinshanDraw() && (G.kanDoraInd || []).length < max;
 }
 // 嶺上から1枚ツモ → 海底牌で王牌補充。 戻り値 = 補充ツモした牌
 function drawRinshan(seat) {
@@ -2075,6 +2407,7 @@ function handleRiichiAutoBottom() {
   // 自動でツモ牌を 捨てる (リーチ後 待ち変更不可)
   G.busy = true;
   setTimeout(() => {
+    kifuRecordStep(drawnTile, { auto: true });  // 牌譜: 自動ツモ切りも記録 (採点対象外)
     discardTile('bottom', drawnTile);
     toast(`(リーチ自動打牌) ${TILE_NAMES[drawnTile.id]}`);
     renderAll();
@@ -2347,6 +2680,24 @@ function showWinModal(seat, hand, context, result) {
   if (!overlay || !titleEl || !textEl) return;
   G.roundOver = true;
   G.busy = true;
+  // 牌譜: 自分のあがり局 or 振り込んだ局を保存 (📖ふりかえり用)
+  try {
+    const kType = (seat === 'bottom') ? 'win' : (context.fromSeat === 'bottom' ? 'dealin' : null);
+    if (kType) {
+      kifuFinishRound(kType, {
+        winnerSeat: seat, winnerLabel: seatShareLabel(seat),
+        winType: context.isTsumo ? 'ツモ' : 'ロン',
+        han: result.han, isYakuman: result.isYakuman,
+        tier: hanToTier(result.han, result.isYakuman),
+        yaku: (result.yakuList || []).map(y => y.name),
+        winTileId: context.winTile ? context.winTile.id : null,
+        winnerHand: (seat !== 'bottom' && hand) ? sortHand(hand.filter(t => t && t.id != null)).map(t => t.id) : [],
+        chankan: !!context.isChankan,
+      });
+      const kifuBtn = document.getElementById('end-kifu');
+      if (kifuBtn && KIFU.lastSaved) kifuBtn.hidden = false;
+    }
+  } catch (e) { /* 牌譜失敗でも表示は続行 */ }
   // ─ 勝利演出: カットイン+ボイス (announce済) → 全員の手牌を表向き公開して一拍 → リザルト
   renderAll();
 
@@ -2649,6 +3000,9 @@ function startNewRound() {
   if (nextBtn) nextBtn.style.display = '';
   const peekReturn = document.getElementById('peek-return');
   if (peekReturn) peekReturn.hidden = true;
+  kifuStartRound();  // 牌譜: 新しい局の記録開始
+  const endKifuBtn = document.getElementById('end-kifu');
+  if (endKifuBtn) endKifuBtn.hidden = true;
   if (NETQ()) NETQ().onNewRound();  // net対戦: endInfo クリア
   renderAll();
 
@@ -3114,8 +3468,9 @@ if (document.getElementById('table')) {
           return;
         }
       }
-      // AI採点: 捨てる直前の手牌14枚で評価 (🎓トグルON時のみ)
+      // AI採点: 捨てる直前の手牌14枚で評価 (🎓トグルON時のみ) + 牌譜記録
       coachEvaluateDiscard(tile);
+      kifuRecordStep(tile);
       // net対戦ゲスト: アクション送信のみ (ホストが適用して状態が返る)
       if (NETQ() && NETQ().isGuest()) { NETQ().sendDiscard(tile); return; }
       discardTile('bottom', tile);
@@ -3272,6 +3627,10 @@ if (document.getElementById('table')) {
       renderAll();
     });
     document.getElementById('end-next')?.addEventListener('click', nextRound);
+    // 牌譜: リザルトから直接ふりかえり
+    document.getElementById('end-kifu')?.addEventListener('click', () => {
+      if (KIFU.lastSaved) kifuOpenViewer(KIFU.lastSaved, false);
+    });
     document.getElementById('dice-ok')?.addEventListener('click', closeDiceCeremony);
     // 盤面を見る ⇄ 結果に戻る (局終了時、 モーダルを一時的に閉じて 公開された手牌と河を見る)
     document.getElementById('end-peek')?.addEventListener('click', () => {
