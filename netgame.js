@@ -591,7 +591,12 @@ const NetGame = (() => {
     G.pendingCall = null;
     if (offer && rotSeat(offer.seat, k) === 'bottom') {
       if (offer.kind === 'call') {
-        G.pendingCall = { fromSeat: rotSeat(offer.fromSeat, k), tile: offer.tile, canKan: !!offer.canKan };
+        if (typeof optNoNaki !== 'undefined' && optNoNaki) {
+          // ⚙️鳴きなし: ポン/カンオファーを自動スルー (ロンは対象外)
+          setTimeout(() => guestAction('pass'), 80);
+        } else {
+          G.pendingCall = { fromSeat: rotSeat(offer.fromSeat, k), tile: offer.tile, canKan: !!offer.canKan };
+        }
       } else {
         G.pendingRon = { fromSeat: rotSeat(offer.fromSeat, k), tile: offer.tile, chankan: !!offer.chankan };
       }

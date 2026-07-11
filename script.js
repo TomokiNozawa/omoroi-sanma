@@ -927,6 +927,7 @@ function renderHand(seat) {
       if (declaring) el.classList.add(keepSet.has(tile) ? 'tile--riichi-ok' : 'tile--dimmed');
       el.addEventListener('click', () => onMyHandClick(tile));
       el.addEventListener('dblclick', () => onMyHandDblClick(tile));
+      attachTileDrag(el, tile);  // モバイル: 上へドラッグで打牌
       if (G.selected === tile) el.classList.add('tile--selected');
     };
     sorted.forEach(tile => {
@@ -1494,6 +1495,116 @@ function kifuEvalStep(step) {
   return coachAnalyzeCore(hand14, melds3, tile, remainOf, riichiRivers);
 }
 
+// ─── ⚙️ 対局中設定 (雀魂の 理/和/鳴/切 を参考: 理牌=常時自動、 ツモ切り=非採用) ───
+// 鳴きなし: 自分へのポン/カン確認を自動スルー / 自動和了: ツモ・ロン可能時に自動あがり /
+// 自動北抜き: 北をツモったら自動で抜く / 効果音・AI採点: 既存トグルを集約
+let optNoNaki = false;
+let optAutoWin = false;
+let optAutoKita = false;
+
+function loadGameOptions() {
+  optNoNaki = localStorage.getItem('omoroi-opt-nonaki') === '1';
+  optAutoWin = localStorage.getItem('omoroi-opt-autowin') === '1';
+  optAutoKita = localStorage.getItem('omoroi-opt-autokita') === '1';
+  seMuted = localStorage.getItem('omoroi-se-muted') === '1';
+  coachOn = localStorage.getItem('omoroi-coach') !== '0';
+}
+
+function openSettings() {
+  let ov = document.getElementById('settings-overlay');
+  if (!ov) {
+    ov = document.createElement('div');
+    ov.id = 'settings-overlay';
+    ov.className = 'end-overlay settings-overlay';  // 既存モーダルとデザイン統一
+    ov.hidden = true;
+    const row = (id, icon, label, desc) => `
+      <label class="settings-row" for="${id}">
+        <span class="settings-row__main">${icon} ${label}<span class="settings-row__desc">${desc}</span></span>
+        <input type="checkbox" id="${id}" class="settings-row__cb">
+      </label>`;
+    ov.innerHTML = `
+      <div class="end-modal settings-modal">
+        <h2 class="end-modal__title">⚙️ 対局設定</h2>
+        <div class="settings-body">
+          ${row('opt-nonaki', '🚫', '鳴きなし', 'ポン・カンの確認を自動でスルー (ロンは出ます)')}
+          ${row('opt-autowin', '🎉', '自動和了', 'ツモ・ロンできる時に自動であがる')}
+          ${row('opt-autokita', '🀃', '自動北抜き', '北をツモったら自動で抜く')}
+          ${row('opt-se', '🔊', '効果音・ボイス', '打牌音や「リーチ!」等の発声')}
+          ${row('opt-coach', '🎓', 'AI採点コーチ', '打牌のたびに一言評価 (牌効率+安全度)')}
+        </div>
+        <div class="end-modal__nav">
+          <button class="end-modal__btn kifu-btn" id="settings-close">閉じる</button>
+        </div>
+      </div>`;
+    document.body.appendChild(ov);
+    document.getElementById('settings-close').addEventListener('click', closeSettings);
+    // トグル反映 (即時保存)
+    const bind = (id, fn) => document.getElementById(id).addEventListener('change', (e) => fn(e.target.checked));
+    bind('opt-nonaki', (v) => { optNoNaki = v; localStorage.setItem('omoroi-opt-nonaki', v ? '1' : '0'); toast(v ? '🚫 鳴きなし ON — ポン/カン確認をスルーします' : '🚫 鳴きなし OFF'); });
+    bind('opt-autowin', (v) => { optAutoWin = v; localStorage.setItem('omoroi-opt-autowin', v ? '1' : '0'); toast(v ? '🎉 自動和了 ON' : '🎉 自動和了 OFF'); updateActionButtons(); });
+    bind('opt-autokita', (v) => { optAutoKita = v; localStorage.setItem('omoroi-opt-autokita', v ? '1' : '0'); toast(v ? '🀃 自動北抜き ON' : '🀃 自動北抜き OFF'); updateActionButtons(); });
+    bind('opt-se', (v) => {
+      seMuted = !v;
+      localStorage.setItem('omoroi-se-muted', seMuted ? '1' : '0');
+      if (seMuted) { try { window.speechSynthesis?.cancel(); } catch (e) {} }
+      else playVoice('on');
+    });
+    bind('opt-coach', (v) => {
+      coachOn = v;
+      localStorage.setItem('omoroi-coach', v ? '1' : '0');
+      if (!v) { const cb = document.getElementById('coach-banner'); if (cb) cb.hidden = true; }
+    });
+    // Esc閉じ + Tabフォーカストラップ (capture でゲームショートカットより優先)
+    document.addEventListener('keydown', (e) => {
+      const o = document.getElementById('settings-overlay');
+      if (!o || o.hidden) return;
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeSettings(); }
+      else if (e.key === 'Tab') {
+        e.preventDefault(); e.stopPropagation();
+        const items = Array.from(o.querySelectorAll('input, button'));
+        const i = items.indexOf(document.activeElement);
+        const ni = e.shiftKey ? (i <= 0 ? items.length - 1 : i - 1) : (i < 0 || i === items.length - 1 ? 0 : i + 1);
+        items[ni].focus();
+      } else { e.stopPropagation(); }
+    }, true);
+  }
+  // 現在値を反映して表示
+  document.getElementById('opt-nonaki').checked = optNoNaki;
+  document.getElementById('opt-autowin').checked = optAutoWin;
+  document.getElementById('opt-autokita').checked = optAutoKita;
+  document.getElementById('opt-se').checked = !seMuted;
+  document.getElementById('opt-coach').checked = coachOn;
+  ov.hidden = false;
+  document.getElementById('settings-close').focus();
+}
+function closeSettings() {
+  const ov = document.getElementById('settings-overlay');
+  if (ov) ov.hidden = true;
+}
+
+// ─── 自動プレイ (⚙️設定: 自動和了 / 自動北抜き) — updateActionButtons 末尾から発火 ───
+let _autoTimer = null;
+function scheduleAutoPlays() {
+  if (_autoTimer) return;
+  if (!optAutoWin && !optAutoKita) return;
+  _autoTimer = setTimeout(() => {
+    _autoTimer = null;
+    try {
+      if (G.roundOver || G.gameEnded) return;
+      if (optAutoWin) {
+        const t = document.getElementById('btn-tsumo');
+        if (t && !t.disabled) { t.click(); return; }
+        const r = document.getElementById('btn-ron');
+        if (r && !r.disabled) { r.click(); return; }
+      }
+      if (optAutoKita && G.turn === 'bottom' && !G.busy && !G.isRiichi.bottom) {
+        const k = document.getElementById('btn-kita');
+        if (k && !k.disabled) { k.click(); return; }
+      }
+    } catch (e) { /* 自動操作失敗でもゲームは止めない */ }
+  }, 350);
+}
+
 // ─── 共通確認モーダル (破壊的操作の最終確認 — 退出/見逃し等。 Esc=キャンセル/Tabトラップ/44px) ───
 let _confirmOnOk = null;
 function appConfirm(message, onOk, okLabel = 'はい', cancelLabel = 'やめる') {
@@ -1909,6 +2020,20 @@ function updateActionButtons() {
       riichiBtn.disabled = !canRiichi;
     }
   }
+
+  // ─── コンテキスト表示 (雀魂式): 押せないボタンは隠す ───
+  // 打牌のみ 「自分の番なら常設」 (選択前は disabled のまま見せて 操作の目印にする)。
+  // ツモ/ロンは同時に成立しないため、 あがれる時はどちらか1つだけが現れる
+  const discardBtn2 = document.getElementById('btn-discard');
+  if (discardBtn2) discardBtn2.hidden = !(myTurn && has14 && G.justRiichiDeclared !== 'bottom' || (G.justRiichiDeclared === 'bottom' && G.turn === 'bottom'));
+  ['btn-riichi', 'btn-tsumo', 'btn-ron', 'btn-pass', 'btn-pon', 'btn-kita', 'btn-kan'].forEach(id => {
+    const b = document.getElementById(id);
+    if (b) b.hidden = b.disabled;
+  });
+  // パスボタンの文言: ロン見逃し と 鳴きスルー で切替
+  if (passBtn && !passBtn.hidden) passBtn.textContent = G.pendingRon ? '見逃す' : 'スルー';
+  // ⚙️自動設定 (自動和了/自動北抜き) の発火
+  scheduleAutoPlays();
 }
 
 // ─── シャンテン数 (テンパイまでの残り枚数、 標準形+七対子+国士の最小) ───
@@ -2059,8 +2184,37 @@ function onMyHandClick(tile) {
   updateHint();
 }
 
+// ─── 打牌の共通経路 (打牌ボタン / PCダブルクリック / モバイルドラッグ が全てここを通る) ───
+// バリデーション (リーチ宣言中のテンパイ維持) → AI採点 → 牌譜記録 → 打牌/net送信 → ターン進行
+function attemptDiscard(tile) {
+  if (G.turn !== 'bottom' || G.busy || !tile || G.roundOver) return false;
+  if (!hasDrawn('bottom')) return false;
+  if (G.isRiichi.bottom && G.justRiichiDeclared !== 'bottom') return false;  // リーチ後は自動進行に任せる
+  if (!G.hands.bottom.includes(tile)) return false;
+  // リーチ宣言直後: テンパイが崩れる牌は 捨てられない
+  if (G.justRiichiDeclared === 'bottom') {
+    const rest = G.hands.bottom.filter(t => t !== tile);
+    if (!isTenpai13(rest, meldTriples('bottom'))) {
+      toast('リーチ中は テンパイが崩れる牌は 捨てられません');
+      return false;
+    }
+  }
+  // AI採点: 捨てる直前の手牌14枚で評価 (🎓トグルON時のみ) + 牌譜記録
+  coachEvaluateDiscard(tile);
+  kifuRecordStep(tile);
+  // net対戦ゲスト: アクション送信のみ (ホストが適用して状態が返る)
+  if (NETQ() && NETQ().isGuest()) { NETQ().sendDiscard(tile); return true; }
+  discardTile('bottom', tile);
+  toast(`あなたが ${TILE_NAMES[tile.id]} を打牌`);
+  renderAll();
+  // CPU/リモートがロンした場合 (busy/roundOver/オファー中) は ターン進行しない
+  if (G.roundOver || G.busy || netOfferPending()) return true;
+  setTimeout(() => { nextTurn(); startTurn(); }, 120);
+  return true;
+}
+
 // ダブルクリック = 選択 + 即打牌 (PC=マウス環境限定のショートカット。
-// タッチ端末では 素早い2タップ (選択→取消のつもり) が 誤打牌になるため無効化)
+// タッチ端末では 素早い2タップ (選択→取消のつもり) が 誤打牌になるため無効化 — 代わりにドラッグ打牌)
 const _dblDiscardOk = (typeof window !== 'undefined' && window.matchMedia)
   ? window.matchMedia('(hover: hover) and (pointer: fine)').matches : true;
 function onMyHandDblClick(tile) {
@@ -2069,8 +2223,45 @@ function onMyHandDblClick(tile) {
   if (!hasDrawn('bottom')) return;
   if (G.isRiichi.bottom && G.justRiichiDeclared !== 'bottom') return;
   G.selected = tile;
-  updateActionButtons();  // disabled のままだと click() が発火しないため 先に反映
-  document.getElementById('btn-discard')?.click();
+  updateActionButtons();
+  attemptDiscard(tile);
+}
+
+// ─── モバイル: ドラッグ打牌 (牌を上方向=河へスワイプで捨てる、 タッチ端末のみ) ───
+const DRAG_DISCARD_PX = 60;   // これ以上 上へ動かして離すと打牌
+let _tileDrag = null;
+function attachTileDrag(el, tile) {
+  if (_dblDiscardOk) return;  // マウス環境は対象外 (クリック+打牌 or ダブルクリック)
+  el.addEventListener('touchstart', (e) => {
+    if (G.turn !== 'bottom' || G.busy || G.roundOver || !hasDrawn('bottom')) return;
+    if (G.isRiichi.bottom && G.justRiichiDeclared !== 'bottom') return;
+    const t = e.touches[0];
+    _tileDrag = { tile, el, x0: t.clientX, y0: t.clientY, moved: false };
+  }, { passive: true });
+  el.addEventListener('touchmove', (e) => {
+    if (!_tileDrag || _tileDrag.el !== el) return;
+    const t = e.touches[0];
+    const dx = t.clientX - _tileDrag.x0;
+    const dy = t.clientY - _tileDrag.y0;
+    if (!_tileDrag.moved && Math.abs(dx) < 10 && Math.abs(dy) < 10) return;  // タップ猶予
+    _tileDrag.moved = true;
+    e.preventDefault();  // 画面スクロール抑止
+    el.style.transform = `translate(${dx}px, ${dy}px)`;
+    el.classList.toggle('tile--drag-ready', dy < -DRAG_DISCARD_PX);
+  }, { passive: false });
+  const endDrag = () => {
+    if (!_tileDrag || _tileDrag.el !== el) return;
+    const d = _tileDrag;
+    _tileDrag = null;
+    const ready = el.classList.contains('tile--drag-ready');
+    el.style.transform = '';
+    el.classList.remove('tile--drag-ready');
+    if (d.moved && ready) {
+      if (!attemptDiscard(d.tile)) renderHand('bottom');  // 打牌不可なら元の位置へ
+    }
+  };
+  el.addEventListener('touchend', endDrag);
+  el.addEventListener('touchcancel', endDrag);
 }
 
 // ─── ツモ動作 ──────────────────────────────────
@@ -2342,11 +2533,12 @@ function checkCallsAfterDiscard(fromSeat, tile) {
     if (cnt < 2 || tile.id === KITA_ID) continue;
     const canKan = cnt >= 3 && kanAllowed();
     if (seat === 'bottom' && !(NETQ() && NETQ().isGuest())) {
+      if (optNoNaki) continue;  // ⚙️鳴きなし: 自分へのポン/カン確認を自動スルー
       // 自家 (ソロ/ホスト): ボタン待ち
       G.pendingCall = { fromSeat, tile, canKan };
       G.busy = true;
       playSE('alert');
-      toast(`ポンできます! (${TILE_NAMES[tile.id]}) — ポン${canKan ? '/カン' : ''}/見逃す を選択`);
+      toast(`ポンできます! (${TILE_NAMES[tile.id]}) — ポン${canKan ? '/カン' : ''}/スルー を選択`);
       renderAll();
       return true;
     }
@@ -3511,41 +3703,10 @@ function initGame() {
 
 if (document.getElementById('table')) {
   document.addEventListener('DOMContentLoaded', () => {
+    // ⚙️対局設定 (鳴きなし/自動和了/自動北抜き/効果音/AI採点 — 端末ごとに localStorage 保持)
+    loadGameOptions();
     initGame();
-    // 効果音 ON/OFF トグル (端末ごとの表示設定なので localStorage 保持)
-    seMuted = localStorage.getItem('omoroi-se-muted') === '1';
-    const seBtn = document.getElementById('se-btn');
-    if (seBtn) {
-      seBtn.textContent = seMuted ? '🔇' : '🔊';
-      seBtn.addEventListener('click', () => {
-        seMuted = !seMuted;
-        localStorage.setItem('omoroi-se-muted', seMuted ? '1' : '0');
-        seBtn.textContent = seMuted ? '🔇' : '🔊';
-        toast(seMuted ? '効果音・ボイス OFF' : '効果音・ボイス ON');
-        if (seMuted) { try { window.speechSynthesis?.cancel(); } catch (e) {} }
-        else playVoice('on');
-      });
-    }
-    // AI採点 ON/OFF トグル (端末ごとの表示設定なので localStorage 保持、 既定ON)
-    coachOn = localStorage.getItem('omoroi-coach') !== '0';
-    const coachBtn = document.getElementById('coach-btn');
-    if (coachBtn) {
-      const paintCoach = () => {
-        coachBtn.style.opacity = coachOn ? '1' : '0.35';
-        coachBtn.title = `AI採点 ${coachOn ? 'ON' : 'OFF'} — 打牌のたびに一言評価`;
-      };
-      paintCoach();
-      coachBtn.addEventListener('click', () => {
-        coachOn = !coachOn;
-        localStorage.setItem('omoroi-coach', coachOn ? '1' : '0');
-        paintCoach();
-        toast(coachOn ? '🎓 AI採点 ON — 打牌のたびに評価します' : '🎓 AI採点 OFF');
-        if (!coachOn) {
-          const cb = document.getElementById('coach-banner');
-          if (cb) cb.hidden = true;
-        }
-      });
-    }
+    document.getElementById('settings-btn')?.addEventListener('click', openSettings);
     document.getElementById('guide-next')?.addEventListener('click', () => {
       guideIdx++;
       if (guideIdx >= GUIDE_STEPS.length) finishGuide();
@@ -3554,27 +3715,7 @@ if (document.getElementById('table')) {
     document.getElementById('guide-skip')?.addEventListener('click', finishGuide);
     document.getElementById('guide-btn')?.addEventListener('click', showGuide);
     document.getElementById('btn-discard')?.addEventListener('click', () => {
-      if (G.turn !== 'bottom' || G.busy || !G.selected || G.roundOver) return;
-      const tile = G.selected;
-      // リーチ宣言直後: テンパイが崩れる牌は 捨てられない
-      if (G.justRiichiDeclared === 'bottom') {
-        const rest = G.hands.bottom.filter(t => t !== tile);
-        if (!isTenpai13(rest, meldTriples('bottom'))) {
-          toast('リーチ中は テンパイが崩れる牌は 捨てられません');
-          return;
-        }
-      }
-      // AI採点: 捨てる直前の手牌14枚で評価 (🎓トグルON時のみ) + 牌譜記録
-      coachEvaluateDiscard(tile);
-      kifuRecordStep(tile);
-      // net対戦ゲスト: アクション送信のみ (ホストが適用して状態が返る)
-      if (NETQ() && NETQ().isGuest()) { NETQ().sendDiscard(tile); return; }
-      discardTile('bottom', tile);
-      toast(`あなたが ${TILE_NAMES[tile.id]} を打牌`);
-      renderAll();
-      // CPU/リモートがロンした場合 (busy/roundOver/オファー中) は ターン進行しない
-      if (G.roundOver || G.busy || netOfferPending()) return;
-      setTimeout(() => { nextTurn(); startTurn(); }, 120);
+      attemptDiscard(G.selected);
     });
     document.getElementById('btn-kita')?.addEventListener('click', () => {
       if (G.turn !== 'bottom' || G.busy || G.roundOver) return;
