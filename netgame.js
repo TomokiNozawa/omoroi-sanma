@@ -199,6 +199,7 @@ const NetGame = (() => {
       oya: G.oya, turn: G.turn, emptySeat: G.emptySeat, cpuSeats: G.cpuSeats,
       scores: G.scores, kitas: G.kitas, kitaTiles: G.kitaTiles,
       isRiichi: G.isRiichi, riichiTurnsLeft: G.riichiTurnsLeft,
+      doubleRiichi: G.doubleRiichi, justKanDrawn: G.justKanDrawn,
       justRiichiDeclared: G.justRiichiDeclared,
       rivers: G.rivers,
       handCounts: Object.fromEntries(ALL_SEATS.map(s => [s, G.hands[s].length])),
@@ -552,6 +553,9 @@ const NetGame = (() => {
     G.kanDoraInd = pub.kanDora || [];
     if (pub.rules) G.rules = pub.rules;
     G.isRiichi = rotKeys(pub.isRiichi, k);
+    G.doubleRiichi = pub.doubleRiichi ? rotKeys(pub.doubleRiichi, k)
+      : { bottom: false, right: false, top: false, left: false };
+    G.justKanDrawn = rotSeat(pub.justKanDrawn, k) || null;
     G.riichiTurnsLeft = rotKeys(pub.riichiTurnsLeft, k);
     G.justRiichiDeclared = rotSeat(pub.justRiichiDeclared, k);
     G.rivers = rotKeys(pub.rivers, k);
