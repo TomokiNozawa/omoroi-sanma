@@ -502,6 +502,25 @@ body {
 .kifu-badge--win { background: rgba(255,235,59,0.2); color: #ffeb3b; border: 1px solid rgba(255,235,59,0.5); }
 .kifu-badge--dealin { background: rgba(198,40,40,0.25); color: #ff8a80; border: 1px solid rgba(255,138,128,0.5); }
 
+/* ── 共通確認モーダル (退出/見逃し等の最終確認 — 最前面 z120) ── */
+.confirm-overlay { z-index: 120; }
+.confirm-modal { max-width: 320px; }
+.confirm-modal__text { font-size: 13px; line-height: 1.7; }
+.confirm-modal .confirm-ok { background: #c62828; border-color: #ff8a80; }
+.confirm-modal .confirm-ok:hover { background: #e53935; }
+
+/* ゲスト対戦中の 「ロビーへ」 降格表示 (誤タップで対戦離脱を防ぐ小さな退出リンク) */
+.end-modal__btn--leave {
+  flex: 0 0 auto !important;
+  font-size: 10px !important;
+  padding: 4px 8px !important;
+  background: none !important;
+  border: none !important;
+  color: #789 !important;
+  text-decoration: underline;
+  align-self: center;
+}
+
 /* ── 局終了モーダル ── */
 .end-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 100; }
 .end-overlay[hidden] { display: none; }

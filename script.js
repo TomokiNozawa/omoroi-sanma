@@ -1494,6 +1494,77 @@ function kifuEvalStep(step) {
   return coachAnalyzeCore(hand14, melds3, tile, remainOf, riichiRivers);
 }
 
+// ─── 共通確認モーダル (破壊的操作の最終確認 — 退出/見逃し等。 Esc=キャンセル/Tabトラップ/44px) ───
+let _confirmOnOk = null;
+function appConfirm(message, onOk, okLabel = 'はい', cancelLabel = 'やめる') {
+  let ov = document.getElementById('confirm-overlay');
+  if (!ov) {
+    ov = document.createElement('div');
+    ov.id = 'confirm-overlay';
+    ov.className = 'end-overlay confirm-overlay';  // 既存モーダルとデザイン統一
+    ov.hidden = true;
+    ov.innerHTML = `
+      <div class="end-modal confirm-modal">
+        <p class="end-modal__text confirm-modal__text" id="confirm-text"></p>
+        <div class="end-modal__nav">
+          <button class="end-modal__btn end-modal__btn--secondary kifu-btn" id="confirm-cancel">やめる</button>
+          <button class="end-modal__btn kifu-btn confirm-ok" id="confirm-ok">はい</button>
+        </div>
+      </div>`;
+    document.body.appendChild(ov);
+    document.getElementById('confirm-cancel').addEventListener('click', appConfirmClose);
+    document.getElementById('confirm-ok').addEventListener('click', () => {
+      const fn = _confirmOnOk;
+      appConfirmClose();
+      if (fn) fn();
+    });
+    // Esc=キャンセル / Tabトラップ (capture でゲーム側キー操作より優先)
+    document.addEventListener('keydown', (e) => {
+      const o = document.getElementById('confirm-overlay');
+      if (!o || o.hidden) return;
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); appConfirmClose(); }
+      else if (e.key === 'Tab') {
+        e.preventDefault(); e.stopPropagation();
+        const btns = [document.getElementById('confirm-cancel'), document.getElementById('confirm-ok')];
+        btns[document.activeElement === btns[0] ? 1 : 0].focus();
+      } else if (e.key === 'Enter') {
+        // Enter 誤爆で OK にしない (フォーカスされたボタンのみ発火に任せる)
+        if (document.activeElement !== document.getElementById('confirm-ok')) { e.preventDefault(); e.stopPropagation(); }
+      } else {
+        e.stopPropagation();  // 確認中は R/T/L 等のゲームショートカットを止める
+      }
+    }, true);
+  }
+  document.getElementById('confirm-text').innerHTML = message;
+  document.getElementById('confirm-ok').textContent = okLabel;
+  document.getElementById('confirm-cancel').textContent = cancelLabel;
+  _confirmOnOk = onOk;
+  ov.hidden = false;
+  document.getElementById('confirm-cancel').focus();  // 既定フォーカスは安全側 (キャンセル)
+}
+function appConfirmClose() {
+  const ov = document.getElementById('confirm-overlay');
+  if (ov) ov.hidden = true;
+  _confirmOnOk = null;
+}
+
+// ロビーへ戻る確認 (対局状況に応じてメッセージ切替、 半荘終了後は確認なしで直行)
+let _leavingConfirmed = false;
+function confirmLeaveToLobby() {
+  const inGame = G.hands.bottom.length > 0 && !G.gameEnded;
+  if (!inGame) { _leavingConfirmed = true; location.href = 'index.html'; return; }
+  const n = NETQ();
+  let msg;
+  if (n && n.isGuest && n.isGuest()) {
+    msg = 'ルームから退出して ロビーへ戻りますか?<br><b>対戦の途中です</b> — 退出すると この対戦には戻れません (あなたの手番はCPUが代打ちします)';
+  } else if (n && n.isHost && n.isHost()) {
+    msg = 'ロビーへ戻りますか?<br><b>あなたはホストです</b> — 退出すると ルーム全体の対戦が終了します';
+  } else {
+    msg = 'ロビーへ戻りますか?<br>進行中の半荘は ここで終了します (保存されません)';
+  }
+  appConfirm(msg, () => { _leavingConfirmed = true; location.href = 'index.html'; }, '退出する', 'つづける');
+}
+
 // ─── 牌譜ビューア (リザルト/ロビー共用のオーバーレイ、 Esc/←→/Tabトラップ対応) ───
 let _kifuView = null;  // { entry, idx, evals, fromList }
 function kifuEnsureOverlay() {
@@ -1988,8 +2059,12 @@ function onMyHandClick(tile) {
   updateHint();
 }
 
-// ダブルクリック = 選択 + 即打牌 (PC向けショートカット。 打牌可否のガードは 打牌ボタン handler に集約)
+// ダブルクリック = 選択 + 即打牌 (PC=マウス環境限定のショートカット。
+// タッチ端末では 素早い2タップ (選択→取消のつもり) が 誤打牌になるため無効化)
+const _dblDiscardOk = (typeof window !== 'undefined' && window.matchMedia)
+  ? window.matchMedia('(hover: hover) and (pointer: fine)').matches : true;
 function onMyHandDblClick(tile) {
+  if (!_dblDiscardOk) return;
   if (G.turn !== 'bottom' || G.busy || G.roundOver) return;
   if (!hasDrawn('bottom')) return;
   if (G.isRiichi.bottom && G.justRiichiDeclared !== 'bottom') return;
@@ -2911,6 +2986,7 @@ function nextRound() {
       = `${rankedT.filter(s => G.scores[s] < 0).map(s => seatShareLabel(s)).join('・')} の持ち点がマイナスになったため終了です。<br>最終スコア:<br>${rankedT.map((s, i) => `${i + 1}位 ${seatShareLabel(s)} = ${G.scores[s].toLocaleString()}点`).join('<br>')}`;
     const nextBtnT = document.getElementById('end-next');
     if (nextBtnT) nextBtnT.style.display = 'none';
+    G.gameEnded = true;  // 半荘終了と同じ扱い (退出確認を出さない + net の操作受付停止)
     document.getElementById('end-overlay').hidden = false;
     if (NETQ()) NETQ().onGameEnd(document.getElementById('end-title').textContent, document.getElementById('end-text').innerHTML);
     return;
@@ -3603,17 +3679,21 @@ if (document.getElementById('table')) {
         return;
       }
       if (!G.pendingRon || G.roundOver) return;
-      if (NETQ() && NETQ().isGuest()) { NETQ().guestAction('pass'); return; }
-      // 見逃し: リーチ中は この局ずっとロン不可、 通常は 次の自摸まで ロン不可 (フリテン)
-      if (G.isRiichi.bottom) G.passFuriten = true;
-      else G.tempFuriten = true;
-      const wasChankan = !!G.pendingRon.chankan;
-      G.pendingRon = null;
-      G.busy = false;
-      toast('見逃しました (フリテン: しばらくロンできません)');
-      if (wasChankan) { resumeAfterChankanPass(); return; }  // 加槓成立 → 加槓者のターン続行
-      renderAll();
-      setTimeout(() => { nextTurn(); startTurn(); }, 120);
+      // あがり放棄は取り返しがつかない (フリテン) ため 最終確認を挟む
+      appConfirm('<b>あがれる牌です。</b>本当に見逃しますか?<br>見逃すと フリテンになり しばらくロンできません', () => {
+        if (!G.pendingRon || G.roundOver) return;  // 確認中にオファー時間切れ等で消えた場合
+        if (NETQ() && NETQ().isGuest()) { NETQ().guestAction('pass'); return; }
+        // 見逃し: リーチ中は この局ずっとロン不可、 通常は 次の自摸まで ロン不可 (フリテン)
+        if (G.isRiichi.bottom) G.passFuriten = true;
+        else G.tempFuriten = true;
+        const wasChankan = !!G.pendingRon.chankan;
+        G.pendingRon = null;
+        G.busy = false;
+        toast('見逃しました (フリテン: しばらくロンできません)');
+        if (wasChankan) { resumeAfterChankanPass(); return; }  // 加槓成立 → 加槓者のターン続行
+        renderAll();
+        setTimeout(() => { nextTurn(); startTurn(); }, 120);
+      }, '見逃す', 'やめる');
     });
     document.getElementById('btn-riichi')?.addEventListener('click', () => {
       if (G.turn !== 'bottom' || G.busy || G.roundOver) return;
@@ -3650,6 +3730,15 @@ if (document.getElementById('table')) {
     // 牌譜: リザルトから直接ふりかえり
     document.getElementById('end-kifu')?.addEventListener('click', () => {
       if (KIFU.lastSaved) kifuOpenViewer(KIFU.lastSaved, false);
+    });
+    // ロビー退出は必ず最終確認を挟む (誤タップ防止 — ゲストは対戦復帰不能のため特に重要)
+    document.getElementById('btn-back')?.addEventListener('click', (e) => { e.preventDefault(); confirmLeaveToLobby(); });
+    document.getElementById('end-lobby')?.addEventListener('click', (e) => { e.preventDefault(); confirmLeaveToLobby(); });
+    // ブラウザバック/リロード/スワイプバックの誤操作ガード (対局中のみ、 確認済み退出は素通し)
+    window.addEventListener('beforeunload', (e) => {
+      if (_leavingConfirmed || G.gameEnded || G.hands.bottom.length === 0) return;
+      e.preventDefault();
+      e.returnValue = '';
     });
     document.getElementById('dice-ok')?.addEventListener('click', closeDiceCeremony);
     // 盤面を見る ⇄ 結果に戻る (局終了時、 モーダルを一時的に閉じて 公開された手牌と河を見る)

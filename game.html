@@ -4,13 +4,13 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="theme-color" content="#0d3b1f">
-  <link rel="stylesheet" href="style.css?v=0.9.4">
+  <link rel="stylesheet" href="style.css?v=0.9.5a">
   <title>対戦中 — おもろい三麻</title>
 </head>
 <body class="game-body">
   <div class="game">
     <header class="game__header">
-      <a href="index.html" class="game__back" aria-label="ロビーへ戻る">←</a>
+      <a href="index.html" class="game__back" id="btn-back" aria-label="ロビーへ戻る">←</a>
       <span class="game__round" id="game-round">東1局 0本場</span>
       <span class="game__turn" id="game-turn">あなたの番</span>
       <span class="game__remain" id="game-remain">山残: 54</span>
@@ -138,14 +138,14 @@
       <div class="end-modal__nav">
         <button class="end-modal__btn" id="end-next">次の局へ</button>
         <button class="end-modal__btn end-modal__btn--secondary" id="end-kifu" hidden>📖 ふりかえる</button>
-        <a href="index.html" class="end-modal__btn end-modal__btn--secondary">ロビーへ</a>
+        <a href="index.html" class="end-modal__btn end-modal__btn--secondary" id="end-lobby">ロビーへ</a>
       </div>
     </div>
   </div>
 
-  <script src="firebase-config.js?v=0.9.4"></script>
-  <script src="net.js?v=0.9.4"></script>
-  <script src="script.js?v=0.9.4"></script>
-  <script src="netgame.js?v=0.9.4"></script>
+  <script src="firebase-config.js?v=0.9.5a"></script>
+  <script src="net.js?v=0.9.5a"></script>
+  <script src="script.js?v=0.9.5a"></script>
+  <script src="netgame.js?v=0.9.5a"></script>
 </body>
 </html>

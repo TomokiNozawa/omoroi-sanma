@@ -643,6 +643,8 @@ const NetGame = (() => {
     } else if (!pub.endInfo && S.endInfoShown) {
       S.endInfoShown = false;
       document.getElementById('end-overlay').hidden = true;
+      const lobbyBtn = document.getElementById('end-lobby');
+      if (lobbyBtn) { lobbyBtn.classList.remove('end-modal__btn--leave'); lobbyBtn.textContent = 'ロビーへ'; }
     }
     S.busySent = false;
     G.busy = false;
@@ -663,11 +665,19 @@ const NetGame = (() => {
   }
   function showGuestEnd(info) {
     const overlay = document.getElementById('end-overlay');
+    if (info.kind === 'gameEnd') G.gameEnded = true;  // 半荘終了: 退出確認なしで戻れるように
     document.getElementById('end-title').textContent = info.title;
     document.getElementById('end-text').innerHTML = info.html
-      + '<p style="font-size:11px; color:#aac; margin-top:8px;">⏳ ホストが次へ進めるのを待っています…</p>';
+      + (info.kind === 'gameEnd' ? ''
+        : '<p style="font-size:11px; color:#aac; margin-top:8px;">⏳ <b>ホストが次の局へ進めるのを待っています…</b> このままお待ちください</p>');
     const nextBtn = document.getElementById('end-next');
     if (nextBtn) nextBtn.style.display = 'none';
+    // 対戦継続中のゲストは 「ロビーへ」 を控えめな退出リンクに降格 (誤タップで対戦離脱を防ぐ)
+    const lobbyBtn = document.getElementById('end-lobby');
+    if (lobbyBtn) {
+      lobbyBtn.classList.toggle('end-modal__btn--leave', info.kind !== 'gameEnd');
+      lobbyBtn.textContent = info.kind === 'gameEnd' ? 'ロビーへ' : '退出する…';
+    }
     // ゲストの牌譜保存: sum (canonical座席) を自分視点に回転して あがり/振込を判定
     try {
       if (info.kind === 'win' && info.sum && KIFU.active && KIFU.steps.length > 0) {
