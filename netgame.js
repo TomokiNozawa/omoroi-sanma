@@ -349,19 +349,15 @@ const NetGame = (() => {
     if (G.roundOver || G.turn !== seat || !hasDrawn(seat)) return;
     if (G.isRiichi[seat] || G.scores[seat] < 1000) return;
     if (!canDeclareRiichi(G.hands[seat], meldTriples(seat))) return;
-    G.isRiichi[seat] = true;
-    G.riichiTurnsLeft[seat] = 4;
-    G.scores[seat] -= 1000;
-    G.kyotaku += 1000;
+    // 宣言モードのみ — リーチ成立 (isRiichi/-1000/供託/発声/🔴表示) は 宣言牌を捨てた瞬間 (discardTile)。
+    // これにより 他クライアントに 「捨てる前からリーチ表示」 が出ない
     G.justRiichiDeclared = seat;
-    G.doubleRiichi[seat] = (G.rivers[seat].length === 0);  // 1巡目リーチ = ダブルリーチ
-    // 発声/カットインは宣言牌の打牌時 (discardTile) に一本化
-    toast(`${seatDispName(seat)} リーチ! (-1000点)`);
     renderAll();
     armTurnTimeout(seat);  // 宣言牌の打牌待ち
   }
   function hostApplyKita(seat) {
     if (G.roundOver || G.turn !== seat || !hasDrawn(seat)) return;
+    if (G.justRiichiDeclared === seat) return;  // リーチ宣言モード中は北抜き不可
     const drawnIdx = (G.justDrawnAll && G.justDrawnAll[seat] != null) ? G.justDrawnAll[seat] : null;
     const drawn = drawnIdx != null ? G.hands[seat][drawnIdx] : null;
     if (G.isRiichi[seat] && !(drawn && drawn.id === KITA_ID)) return;
@@ -591,7 +587,12 @@ const NetGame = (() => {
     G.pendingCall = null;
     if (offer && rotSeat(offer.seat, k) === 'bottom') {
       if (offer.kind === 'call') {
-        G.pendingCall = { fromSeat: rotSeat(offer.fromSeat, k), tile: offer.tile, canKan: !!offer.canKan };
+        if (typeof optNoNaki !== 'undefined' && optNoNaki) {
+          // ⚙️鳴きなし: ポン/カンオファーを自動スルー (ロンは対象外)
+          setTimeout(() => guestAction('pass'), 80);
+        } else {
+          G.pendingCall = { fromSeat: rotSeat(offer.fromSeat, k), tile: offer.tile, canKan: !!offer.canKan };
+        }
       } else {
         G.pendingRon = { fromSeat: rotSeat(offer.fromSeat, k), tile: offer.tile, chankan: !!offer.chankan };
       }
@@ -643,6 +644,8 @@ const NetGame = (() => {
     } else if (!pub.endInfo && S.endInfoShown) {
       S.endInfoShown = false;
       document.getElementById('end-overlay').hidden = true;
+      const lobbyBtn = document.getElementById('end-lobby');
+      if (lobbyBtn) { lobbyBtn.classList.remove('end-modal__btn--leave'); lobbyBtn.textContent = 'ロビーへ'; }
     }
     S.busySent = false;
     G.busy = false;
@@ -663,11 +666,19 @@ const NetGame = (() => {
   }
   function showGuestEnd(info) {
     const overlay = document.getElementById('end-overlay');
+    if (info.kind === 'gameEnd') G.gameEnded = true;  // 半荘終了: 退出確認なしで戻れるように
     document.getElementById('end-title').textContent = info.title;
     document.getElementById('end-text').innerHTML = info.html
-      + '<p style="font-size:11px; color:#aac; margin-top:8px;">⏳ ホストが次へ進めるのを待っています…</p>';
+      + (info.kind === 'gameEnd' ? ''
+        : '<p style="font-size:11px; color:#aac; margin-top:8px;">⏳ <b>ホストが次の局へ進めるのを待っています…</b> このままお待ちください</p>');
     const nextBtn = document.getElementById('end-next');
     if (nextBtn) nextBtn.style.display = 'none';
+    // 対戦継続中のゲストは 「ロビーへ」 を控えめな退出リンクに降格 (誤タップで対戦離脱を防ぐ)
+    const lobbyBtn = document.getElementById('end-lobby');
+    if (lobbyBtn) {
+      lobbyBtn.classList.toggle('end-modal__btn--leave', info.kind !== 'gameEnd');
+      lobbyBtn.textContent = info.kind === 'gameEnd' ? 'ロビーへ' : '退出する…';
+    }
     // ゲストの牌譜保存: sum (canonical座席) を自分視点に回転して あがり/振込を判定
     try {
       if (info.kind === 'win' && info.sum && KIFU.active && KIFU.steps.length > 0) {

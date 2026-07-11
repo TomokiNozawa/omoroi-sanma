@@ -310,9 +310,11 @@ body {
 .seat__hand--left .tile:not(.tile--kita) + .tile--kita { margin-top: 14px; }
 
 /* ── アクションバー (タップ領域 ≥44px、 有効時に色分け) ── */
-.action-bar { display: flex; gap: 5px; padding: 6px 8px; background: rgba(0,0,0,0.55); align-items: stretch; justify-content: space-around; }
-.action-btn { flex: 1; min-height: 44px; padding: 4px 2px; border: 1px solid #4a6; background: #143820; color: #fff; border-radius: 8px; font-size: 13px; font-weight: bold; cursor: pointer; }
+.action-bar { display: flex; gap: 5px; padding: 6px 8px; background: rgba(0,0,0,0.55); align-items: stretch; justify-content: space-around; min-height: 56px; box-sizing: border-box; }
+.action-btn { flex: 1; min-height: 44px; max-width: 160px; padding: 4px 2px; border: 1px solid #4a6; background: #143820; color: #fff; border-radius: 8px; font-size: 13px; font-weight: bold; cursor: pointer; }
 .action-btn:disabled { opacity: 0.25; cursor: not-allowed; font-weight: normal; }
+/* コンテキスト表示 (雀魂式): 押せないボタンは占有せず消す。 bar は min-height でガタつき防止 */
+.action-btn[hidden] { display: none; }
 .action-btn--primary { background: #d32f2f; border-color: #f44336; }
 .action-btn:not(:disabled):active { transform: scale(0.95); }
 #btn-riichi:not(:disabled) { background: #e65100; border-color: #ffb74d; }
@@ -501,6 +503,38 @@ body {
 .kifu-badge { font-size: 10px; padding: 1px 8px; border-radius: 10px; font-weight: bold; }
 .kifu-badge--win { background: rgba(255,235,59,0.2); color: #ffeb3b; border: 1px solid rgba(255,235,59,0.5); }
 .kifu-badge--dealin { background: rgba(198,40,40,0.25); color: #ff8a80; border: 1px solid rgba(255,138,128,0.5); }
+
+/* ── ⚙️ 対局設定モーダル ── */
+.settings-overlay { z-index: 110; }
+.settings-modal { max-width: 340px; text-align: left; }
+.settings-body { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
+.settings-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 48px; padding: 4px 8px; border-radius: 8px; cursor: pointer; background: rgba(0,0,0,0.25); }
+.settings-row:hover { background: rgba(255,255,255,0.06); }
+.settings-row__main { font-size: 13px; color: #e8f2e8; font-weight: bold; }
+.settings-row__desc { display: block; font-size: 10px; color: #9ab; font-weight: normal; margin-top: 1px; }
+.settings-row__cb { width: 22px; height: 22px; accent-color: #4caf50; flex: 0 0 auto; cursor: pointer; }
+
+/* ── モバイル: ドラッグ打牌 (上へスワイプ) ── */
+.tile--drag-ready { box-shadow: 0 0 0 2px #ff9800, 0 0 12px rgba(255,152,0,0.9) !important; opacity: 0.9; }
+
+/* ── 共通確認モーダル (退出/見逃し等の最終確認 — 最前面 z120) ── */
+.confirm-overlay { z-index: 120; }
+.confirm-modal { max-width: 320px; }
+.confirm-modal__text { font-size: 13px; line-height: 1.7; }
+.confirm-modal .confirm-ok { background: #c62828; border-color: #ff8a80; }
+.confirm-modal .confirm-ok:hover { background: #e53935; }
+
+/* ゲスト対戦中の 「ロビーへ」 降格表示 (誤タップで対戦離脱を防ぐ小さな退出リンク) */
+.end-modal__btn--leave {
+  flex: 0 0 auto !important;
+  font-size: 10px !important;
+  padding: 4px 8px !important;
+  background: none !important;
+  border: none !important;
+  color: #789 !important;
+  text-decoration: underline;
+  align-self: center;
+}
 
 /* ── 局終了モーダル ── */
 .end-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 100; }
