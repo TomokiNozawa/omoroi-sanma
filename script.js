@@ -1972,7 +1972,7 @@ function updateActionButtons() {
   // 北抜き: 通常は 手牌に北があれば可、 リーチ後は 「ツモった牌が北」 の時のみ
   const drawnTile = (G.justDrawn != null) ? G.hands.bottom[G.justDrawn] : null;
   const hasKita = G.hands.bottom.some(t => t.id === KITA_ID);
-  const kitaOk = canRinshanDraw()
+  const kitaOk = canRinshanDraw() && G.justRiichiDeclared !== 'bottom'
     && (G.isRiichi.bottom ? (drawnTile && drawnTile.id === KITA_ID) : hasKita);
   document.getElementById('btn-kita').disabled = !(myTurn && has14 && kitaOk);
   // 暗槓: 自分の番 + ツモ済 + 同一牌4枚 + 王牌残2以上 (リーチ中は不可)
@@ -2280,10 +2280,16 @@ function discardTile(seat, tile) {
   if (idx < 0) return false;
   G.hands[seat].splice(idx, 1);
   if (G.justKanDrawn === seat) G.justKanDrawn = null;  // 嶺上開花フラグは打牌で解除
-  // リーチ宣言直後の打牌は 横向きマーク + このタイミングで「リーチ!」発声 (実際の麻雀と同じ)
+  // リーチは 宣言牌が河に落ちる この瞬間に成立 (ボタン押下時ではない — 取消できるため。
+  // isRiichi / -1000点 / 供託 / 🔴表示 / 発声 の全てをここでコミット。 実卓・雀魂と同じ)
   if (G.justRiichiDeclared === seat) {
     tile.isRiichiDeclared = true;
     G.justRiichiDeclared = null;
+    G.isRiichi[seat] = true;
+    G.riichiTurnsLeft[seat] = 4;  // 一発: 直後の decrement で 3 になる (自分含め4ターン以内)
+    G.doubleRiichi[seat] = (G.rivers[seat].length === 0);  // 1巡目リーチ = ダブルリーチ
+    G.scores[seat] -= 1000;
+    G.kyotaku += 1000;
     playSE('riichi');
     announce('riichi');
   }
@@ -2745,13 +2751,8 @@ function cpuPlay(seat) {
   if (hasDrawn(seat) && G.scores[seat] >= 1000 && openMeldIds(seat).length === 0
       && !isWinning(equivHand(seat)) && canDeclareRiichi(G.hands[seat], meldTriples(seat))) {
     if (Math.random() > 0.3) {
-      G.isRiichi[seat] = true;
-      G.riichiTurnsLeft[seat] = 4;
-      G.scores[seat] -= 1000;
-      G.kyotaku += 1000;
-      G.justRiichiDeclared = seat;  // 宣言ターン = この打牌が リーチ宣言牌 (横向き)
-      G.doubleRiichi[seat] = (G.rivers[seat].length === 0);  // 1巡目リーチ = ダブルリーチ
-      toast(`${seatLabel(seat)} リーチ! (-1000点)`);
+      // 宣言モードのみ — リーチ成立 (isRiichi/-1000/供託/発声) は 宣言牌を捨てた瞬間 (discardTile)
+      G.justRiichiDeclared = seat;
       // ※ 宣言ターンは テンパイ維持できる牌のみ捨てる (cpuDiscard 側で制限)
     }
   }
@@ -2985,6 +2986,15 @@ function showWinModal(seat, hand, context, result) {
   // ─ 勝利演出: カットイン+ボイス (announce済) → 全員の手牌を表向き公開して一拍 → リザルト
   renderAll();
 
+  // 実ルール: リーチ宣言牌がロンされた場合 リーチ不成立 — 宣言者の -1000点/供託 を差し戻す
+  if (!context.isTsumo && context.fromSeat && context.winTile && context.winTile.isRiichiDeclared
+      && G.isRiichi[context.fromSeat] && G.kyotaku >= 1000) {
+    G.isRiichi[context.fromSeat] = false;
+    G.doubleRiichi[context.fromSeat] = false;
+    G.riichiTurnsLeft[context.fromSeat] = 0;
+    G.scores[context.fromSeat] += 1000;
+    G.kyotaku -= 1000;
+  }
   // 点数移動 (現在の本場で計算) → その後 連荘/本場 更新
   const prevHonba = G.honba;
   const prevKyotaku = G.kyotaku;
@@ -3719,7 +3729,7 @@ if (document.getElementById('table')) {
     });
     document.getElementById('btn-kita')?.addEventListener('click', () => {
       if (G.turn !== 'bottom' || G.busy || G.roundOver) return;
-      if (!hasDrawn('bottom')) return;
+      if (!hasDrawn('bottom') || G.justRiichiDeclared === 'bottom') return;
       // リーチ後は ツモった牌が北の時のみ (updateActionButtons と同条件)
       const drawnTile = (G.justDrawn != null) ? G.hands.bottom[G.justDrawn] : null;
       if (G.isRiichi.bottom && !(drawnTile && drawnTile.id === KITA_ID)) return;
@@ -3838,33 +3848,24 @@ if (document.getElementById('table')) {
     });
     document.getElementById('btn-riichi')?.addEventListener('click', () => {
       if (G.turn !== 'bottom' || G.busy || G.roundOver) return;
-      // 宣言直後 (宣言牌を捨てる前) は 取消として動作
+      // 宣言直後 (宣言牌を捨てる前) は 取消として動作。 まだ何も確定していないので状態を戻すだけ
       if (G.justRiichiDeclared === 'bottom') {
-        G.isRiichi.bottom = false;
-        G.doubleRiichi.bottom = false;
-        G.riichiTurnsLeft.bottom = 0;
-        G.scores.bottom += 1000;
-        G.kyotaku -= 1000;
         G.justRiichiDeclared = null;
         G.selected = null;
-        toast('リーチを取り消しました (+1000点)');
+        toast('リーチをやめました');
         renderAll();
         return;
       }
       if (G.isRiichi.bottom || G.scores.bottom < 1000) return;
       if (!canDeclareRiichi(G.hands.bottom, meldTriples('bottom'))) return;
-      if (NETQ() && NETQ().isGuest()) { NETQ().guestAction('riichi'); return; }  // 発声は宣言牌打牌時にイベントで届く
-      G.isRiichi.bottom = true;
-      G.riichiTurnsLeft.bottom = 4;  // 一発: 自分含めて 4ターン以内
-      G.scores.bottom -= 1000;
-      G.kyotaku += 1000;
-      G.justRiichiDeclared = 'bottom';  // 次の打牌が リーチ宣言牌 (横向き)、 発声は打牌時 (discardTile)
-      G.doubleRiichi.bottom = (G.rivers.bottom.length === 0);  // 1巡目リーチ = ダブルリーチ
+      if (NETQ() && NETQ().isGuest()) { NETQ().guestAction('riichi'); return; }  // 成立は宣言牌打牌時 (ホスト側 discardTile)
+      // ここでは宣言モードに入るだけ — リーチ成立 (isRiichi/-1000/供託/発声) は 宣言牌を捨てた瞬間 (discardTile)
+      G.justRiichiDeclared = 'bottom';
       // 先頭の候補牌を自動選択 → あがり牌ガイドが即表示される (雀魂式)
       const dispOrder = sortHand(G.hands.bottom.filter((_, i) => i !== G.justDrawn));
       if (G.justDrawn != null && G.hands.bottom[G.justDrawn]) dispOrder.push(G.hands.bottom[G.justDrawn]);
       G.selected = dispOrder.find(t => isTenpai13(G.hands.bottom.filter(x => x !== t), meldTriples('bottom'))) || null;
-      toast('リーチ! 光っている牌を捨てると成立 (やめるなら「リーチ取消」)');
+      toast('光っている牌を捨てるとリーチ成立 (やめるなら「リーチ取消」)');
       renderAll();
     });
     document.getElementById('end-next')?.addEventListener('click', nextRound);

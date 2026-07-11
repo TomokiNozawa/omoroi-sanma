@@ -349,19 +349,15 @@ const NetGame = (() => {
     if (G.roundOver || G.turn !== seat || !hasDrawn(seat)) return;
     if (G.isRiichi[seat] || G.scores[seat] < 1000) return;
     if (!canDeclareRiichi(G.hands[seat], meldTriples(seat))) return;
-    G.isRiichi[seat] = true;
-    G.riichiTurnsLeft[seat] = 4;
-    G.scores[seat] -= 1000;
-    G.kyotaku += 1000;
+    // 宣言モードのみ — リーチ成立 (isRiichi/-1000/供託/発声/🔴表示) は 宣言牌を捨てた瞬間 (discardTile)。
+    // これにより 他クライアントに 「捨てる前からリーチ表示」 が出ない
     G.justRiichiDeclared = seat;
-    G.doubleRiichi[seat] = (G.rivers[seat].length === 0);  // 1巡目リーチ = ダブルリーチ
-    // 発声/カットインは宣言牌の打牌時 (discardTile) に一本化
-    toast(`${seatDispName(seat)} リーチ! (-1000点)`);
     renderAll();
     armTurnTimeout(seat);  // 宣言牌の打牌待ち
   }
   function hostApplyKita(seat) {
     if (G.roundOver || G.turn !== seat || !hasDrawn(seat)) return;
+    if (G.justRiichiDeclared === seat) return;  // リーチ宣言モード中は北抜き不可
     const drawnIdx = (G.justDrawnAll && G.justDrawnAll[seat] != null) ? G.justDrawnAll[seat] : null;
     const drawn = drawnIdx != null ? G.hands[seat][drawnIdx] : null;
     if (G.isRiichi[seat] && !(drawn && drawn.id === KITA_ID)) return;
