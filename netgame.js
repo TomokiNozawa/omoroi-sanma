@@ -213,8 +213,9 @@ const NetGame = (() => {
       phase: G.ceremonyActive ? 'dice' : 'play',
       roundOver: !!G.roundOver,
       melds: G.melds,
-      kanDora: G.kanDoraInd, kanUra: kanUraNow(),
+      kanDora: G.kanDoraInd,  // ※ カン裏 (kanUra) は秘匿情報のため pub に載せない
       rules: G.rules,
+      kuikaeBan: G.kuikaeBan,
       handsOpen: G.roundOver ? G.hands : null,  // 局終了後は全手牌公開 (勝利演出/テンパイ確認)
       dice: (G.diceD1 ? [G.diceD1, G.diceD2] : null),
       ceremonySeq: S.ceremonySeq,
@@ -333,6 +334,7 @@ const NetGame = (() => {
     if (G.roundOver || G.turn !== seat || !hasDrawn(seat)) return;
     const tile = findTile(seat, key);
     if (!tile) return;
+    if (G.kuikaeBan && G.kuikaeBan.seat === seat && tile.id === G.kuikaeBan.id) return;  // 喰い替え禁止
     if (G.justRiichiDeclared === seat) {
       const rest = G.hands[seat].filter(t => t !== tile);
       if (!isTenpai13(rest, meldTriples(seat))) return;  // 不正打牌は無視 (ゲスト側でも防止済)
@@ -341,7 +343,7 @@ const NetGame = (() => {
     discardTile(seat, tile);
     toast(`${seatDispName(seat)} が ${TILE_NAMES[tile.id]} を打牌`);
     renderAll();
-    if (G.pendingRon || G.pendingCall || G.roundOver || S.pendingOffer) return;
+    if (G.pendingRon || G.pendingCall || G.ronQueue || G.roundOver || S.pendingOffer) return;
     G.busy = false;
     setTimeout(() => { nextTurn(); startTurn(); }, 120);
   }
@@ -408,24 +410,29 @@ const NetGame = (() => {
     const { fromSeat, tile, chankan } = S.pendingOffer;
     clearTimeout(S.offerTimer);
     S.pendingOffer = null;
-    const test = [...G.hands[seat], tile, ...meldTriples(seat)];
-    const ctx = {
-      isTsumo: false, isRiichi: G.isRiichi[seat], isOya: G.oya === seat, seatWind: seatWindOf(seat),
-      doraIndicator: G.doraIndicator, uraIndicator: G.uraIndicator, kanDora: G.kanDoraInd, kanUra: kanUraNow(), extraTiles: meldExtraTiles(seat), openMeldIds: openMeldIds(seat), kitas: G.kitas[seat], round: G.round,
-      isDoubleRiichi: G.doubleRiichi[seat], firstDraw: G.rivers[seat].length === 0 && G.kitas[seat] === 0, isHaitei: G.drawTiles.length === 0, isIppatsu: G.riichiTurnsLeft[seat] > 0, winTile: tile, fromSeat,
-      isChankan: !!chankan,
-    };
-    const result = calcYaku(test, ctx);
-    if (result.error || (result.han === 0 && !result.isYakuman)) return resumeAfterOffer();
-    // 搶槓成立: 加槓牌はロン者へ (加槓者の手牌から除去、 加槓は不成立)
-    if (chankan && G.pendingKakan) {
-      const hi = G.hands[fromSeat].indexOf(tile);
-      if (hi >= 0) G.hands[fromSeat].splice(hi, 1);
-      G.pendingKakan = null;
+    if (chankan) {
+      // 搶槓 (単独ロンのみ、 キュー外)
+      const test = [...G.hands[seat], tile, ...meldTriples(seat)];
+      const ctx = {
+        isTsumo: false, isRiichi: G.isRiichi[seat], isOya: G.oya === seat, seatWind: seatWindOf(seat),
+        doraIndicator: G.doraIndicator, uraIndicator: G.uraIndicator, kanDora: G.kanDoraInd, kanUra: kanUraNow(), extraTiles: meldExtraTiles(seat), openMeldIds: openMeldIds(seat), kitas: G.kitas[seat], round: G.round,
+        isDoubleRiichi: G.doubleRiichi[seat], firstDraw: G.rivers[seat].length === 0 && G.kitas[seat] === 0, isHaitei: G.drawTiles.length === 0, isIppatsu: G.riichiTurnsLeft[seat] > 0, winTile: tile, fromSeat,
+        isChankan: true,
+      };
+      const result = calcYaku(test, ctx);
+      if (result.error || (result.han === 0 && !result.isYakuman)) return resumeAfterOffer();
+      if (G.pendingKakan) {
+        const hi = G.hands[fromSeat].indexOf(tile);
+        if (hi >= 0) G.hands[fromSeat].splice(hi, 1);
+        G.pendingKakan = null;
+      }
+      announce('ron');
+      toast(`${seatDispName(seat)} ロン!`);
+      showWinModal(seat, test, ctx, result);
+      return;
     }
-    announce('ron');
-    toast(`${seatDispName(seat)} ロン!`);
-    showWinModal(seat, test, ctx, result);
+    // 通常ロン: キューに受諾 (ダブロンの可能性があるため直接あがらない)
+    ronQueueDecide(seat, true);
   }
   function hostApplyPass(seat) {
     if (!S.pendingOffer || S.pendingOffer.seat !== seat) return;
@@ -445,6 +452,11 @@ const NetGame = (() => {
       if (isRemoteSeat(seat)) return armTurnTimeout(seat);
       G.busy = true;
       setTimeout(() => cpuDiscard(seat), 500);     // CPU: ツモ勝ち判定込みで打牌続行
+      return;
+    }
+    // ロン確認キュー進行中の見逃し/時間切れ: 現在確認中の席を「見逃し」で確定して次へ
+    if (G.ronQueue && G.ronQueue.pending.length > 0) {
+      ronQueueDecide(G.ronQueue.pending[0], false);
       return;
     }
     G.busy = false;
@@ -548,6 +560,7 @@ const NetGame = (() => {
     ALL_SEATS.forEach(s => { if (!G.melds[s]) G.melds[s] = []; });
     G.kanDoraInd = pub.kanDora || [];
     if (pub.rules) G.rules = pub.rules;
+    G.kuikaeBan = pub.kuikaeBan ? { seat: rotSeat(pub.kuikaeBan.seat, k), id: pub.kuikaeBan.id } : null;
     G.isRiichi = rotKeys(pub.isRiichi, k);
     G.doubleRiichi = pub.doubleRiichi ? rotKeys(pub.doubleRiichi, k)
       : { bottom: false, right: false, top: false, left: false };
@@ -679,15 +692,15 @@ const NetGame = (() => {
       lobbyBtn.classList.toggle('end-modal__btn--leave', info.kind !== 'gameEnd');
       lobbyBtn.textContent = info.kind === 'gameEnd' ? 'ロビーへ' : '退出する…';
     }
-    // ゲストの牌譜保存: sum (canonical座席) を自分視点に回転して あがり/振込を判定
+    // ゲストの牌譜保存: sum (canonical座席) を自分視点に回転して あがり/振込を判定 (ダブロン対応)
     try {
       if (info.kind === 'win' && info.sum && KIFU.active && KIFU.steps.length > 0) {
         const k = S.rot;
-        const wSeat = rotSeat(info.sum.winnerSeat, k);
+        const wSeats = (info.sum.winnerSeats || [info.sum.winnerSeat]).map(s => rotSeat(s, k));
         const fSeat = rotSeat(info.sum.fromSeat, k);
-        const type = (wSeat === 'bottom') ? 'win' : (fSeat === 'bottom' ? 'dealin' : null);
+        const type = wSeats.includes('bottom') ? 'win' : (fSeat === 'bottom' ? 'dealin' : null);
         if (type) {
-          kifuFinishRound(type, { ...info.sum, winnerSeat: wSeat, fromSeat: fSeat });
+          kifuFinishRound(type, { ...info.sum, winnerSeat: wSeats[0], winnerSeats: wSeats, fromSeat: fSeat });
           const kifuBtn = document.getElementById('end-kifu');
           if (kifuBtn && KIFU.lastSaved) kifuBtn.hidden = false;
         }

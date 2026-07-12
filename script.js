@@ -82,6 +82,10 @@ const G = {
   scores: { bottom: 35000, right: 35000, top: 35000, left: 35000 },
   // ロン保留 (他家打牌直後に 自家があがれる場合 設定)
   pendingRon: null,  // { fromSeat, tile } or null
+  // ロン確認キュー (ダブロン対応): { fromSeat, tile, entries: {seat:{ctx,result}}, pending: [seat], accepted: [seat] }
+  ronQueue: null,
+  // 喰い替え禁止 (ポン直後、 鳴いた牌と同じ牌は捨てられない): { seat, id } or null
+  kuikaeBan: null,
   // ポン/明槓保留 (他家打牌に自家が鳴ける場合 設定): { fromSeat, tile, canKan, cpu? }
   pendingCall: null,
   // 加槓保留 (搶槓確認中): { seat, meldId, tile } — 全員スルーで completePendingKakan
@@ -96,9 +100,9 @@ const G = {
   kyotaku: 0,
   // 前局の結果 ('oyaWin' | 'koWin' | 'tenpaiOya' | 'notenOya') — 連荘判定用
   lastResult: null,
-  // フリテン (自家がロンを見逃した場合)
-  passFuriten: false,   // リーチ中に見逃し → この局ずっとロン不可
-  tempFuriten: false,   // 見逃し → 次の自摸まで ロン不可
+  // 見逃しフリテン (全席管理 — CPU/リモート含む。 待ち牌が河を通過したら付く)
+  passFuriten: { bottom: false, right: false, top: false, left: false },  // リーチ中の見逃し → この局ずっとロン不可
+  tempFuriten: { bottom: false, right: false, top: false, left: false },  // 見逃し → 次の自摸まで ロン不可
   // 最新の打牌 (河でハイライト表示する)
   lastDiscard: null,
   // 各席の 直近ツモ牌 index (net対戦の 秘匿手牌配信用。 bottom は justDrawn と同値)
@@ -233,8 +237,9 @@ function applyDice(walls, diceTotal, oyaSeat = 'bottom') {
     return null;
   }
 
-  // ドラ位置 (1-based 通し番号 = X-3)
-  const doraGlobal = X - 3;
+  // ドラ位置 = 割れ目 (カット) から3幢目の上段 (1-based 通し番号 = X-2、 実麻雀と同配置)
+  //   割れ目側から: X (嶺上1) → X-1 (嶺上2) → X-2 (ドラ表示) → X-3〜X-6 (カンドラ予約4幢)
+  const doraGlobal = X - 2;
   const dorPos = gToPos(doraGlobal);
   const doraSeat = dorPos.seat;
   const doraDouIdx = dorPos.douIdx0;
@@ -242,14 +247,13 @@ function applyDice(walls, diceTotal, oyaSeat = 'bottom') {
   // 裏ドラ表示牌 = ドラ表示牌と同じ幢の下段 (リーチ和了時のみ公開・加算)
   const uraIndicator = walls[doraSeat][douToArrIdx(doraDouIdx, 'bot')];
 
-  // 王牌 = ドラ (X-3) を中心に 7幢ペア (= 14牌) = カット位置直右の X幢目 〜 X-6幢目
-  // (カット位置より右側の 7幢が王牌、 という麻雀の物理配置と一致)
+  // 王牌 = カット位置直右の X幢目 〜 X-6幢目 (7幢 = 14牌、 実麻雀の物理配置と一致)
   // kingTiles / kingCells は 「カットから遠い側 → カット側」 の順で構築、
-  // 各幢は 下段→上段 の順 → 嶺上 (北抜き補充) の pop() が 「カット側の幢の上段から」 取れる
+  // 各幢は 下段→上段 の順 → 嶺上 (北抜き/カン補充) の pop() が 「カット側の幢の上段から」 取れる
   const kingPosList = [];
   const kingCells = [];
   const kingTiles = [];
-  for (let g = doraGlobal - 3; g <= doraGlobal + 3; g++) {
+  for (let g = X - 6; g <= X; g++) {
     const pos = gToPos(g);
     if (!pos) continue;
     kingPosList.push(pos);
@@ -288,18 +292,19 @@ function applyDice(walls, diceTotal, oyaSeat = 'bottom') {
   // (5) 起点家: 1幢目 〜 X幢目 (王牌外の残り)
   for (let d = 0; d <= X - 1; d++) addAllExceptKing(startSeat, d);
 
-  // 王牌の内訳 (kingTiles/kingCells は 遠→カット順、 各幢 [下,上] で 14枚):
-  //   idx 0-5  = カットから遠い側3幢 = カンドラゾーン (上段=カンドラ表示、 下段=カン裏)
-  //   idx 6-7  = 中央幢 (下段=裏ドラ、 上段=ドラ表示)
-  //   idx 8-13 = カット側3幢 = 嶺上プール (補充ツモ用、 カット側の上段から消費)
-  // カンドラは ドラ表示牌の隣 (嶺上の反対側) から順にめくり、 王牌内で表向きのまま残す (実麻雀ルール)
+  // 王牌の内訳 (kingTiles/kingCells は 遠→カット順、 各幢 [下,上] で 14枚 — 実麻雀と完全同配置):
+  //   idx 0-7   = カットから遠い側4幢 = カンドラゾーン (上段=カンドラ表示×4、 下段=カン裏×4)
+  //   idx 8-9   = 割れ目から3幢目 (下段=裏ドラ、 上段=ドラ表示)
+  //   idx 10-13 = カット側2幢 = 嶺上プール (補充ツモ用4枚、 カット側の上段から消費)
+  // カンドラは ドラ表示牌の隣 (嶺上の反対側) から順にめくり、 王牌内で表向きのまま残す (最大4回 = 実ルール)
   const kanDoraDefs = [
+    { ind: kingTiles[7], ura: kingTiles[6], cell: kingCells[7] },
     { ind: kingTiles[5], ura: kingTiles[4], cell: kingCells[5] },
     { ind: kingTiles[3], ura: kingTiles[2], cell: kingCells[3] },
     { ind: kingTiles[1], ura: kingTiles[0], cell: kingCells[1] },
   ];
   return { startSeat, cutPosInStart: X,
-           kingTiles: kingTiles.slice(8), kingPoolCells: kingCells.slice(8), kanDoraDefs,
+           kingTiles: kingTiles.slice(10), kingPoolCells: kingCells.slice(10), kanDoraDefs,
            drawTiles, doraIndicator, uraIndicator,
            doraSeat, doraDouIdx, kingPosList, kingCells, drawPosList };
 }
@@ -778,8 +783,17 @@ function calcYaku(hand, context) {
     const decomps = stdDecomps;
     if (isToitoi(hand)) { yakuList.push({ name: '対々和', han: 2 }); han += 2; }
     if (isSanshokuDoukou(decomps)) { yakuList.push({ name: '三色同刻', han: 2 }); han += 2; }
-    const ankoCount = countAnkoCount(hand) - openIds.length;  // ポン/明槓は暗刻ではない
-    if (ankoCount >= 3 && context.isTsumo) { yakuList.push({ name: '三暗刻', han: 2 }); han += 2; }
+    // 三暗刻: 暗刻3つ (ポン/明槓は除外)。 ロンの場合 ロン牌で完成した刻子は明刻扱いのため、
+    // 「ロン牌を除いた13枚の時点で完成していた刻子」 だけを暗刻として数える (実ルール準拠)
+    let ankoCount;
+    if (context.isTsumo || !context.winTile) {
+      ankoCount = countAnkoCount(hand) - openIds.length;
+    } else {
+      const c13 = countTiles(hand);
+      c13[context.winTile.id] = (c13[context.winTile.id] || 0) - 1;
+      ankoCount = Object.keys(c13).filter(id => c13[id] >= 3).length - openIds.length;
+    }
+    if (ankoCount >= 3) { yakuList.push({ name: '三暗刻', han: 2 }); han += 2; }
     // ピンフ (全順子 + 雀頭非役牌 + 両面待ち)
     if (isPinfu(decomps, context)) { yakuList.push({ name: 'ピンフ', han: 1 }); han += 1; }
     // 一盃口 / 二盃口 (門前のみ)
@@ -1236,7 +1250,7 @@ function updateHint() {
   } else if (G.hands.bottom.length === handFullCount('bottom') - 1) {
     const waits = waitingIds(G.hands.bottom, meldTriples('bottom'));
     if (waits.length > 0) {
-      const furiten = G.rivers.bottom.some(t => waits.includes(t.id)) || G.passFuriten || G.tempFuriten;
+      const furiten = G.rivers.bottom.some(t => waits.includes(t.id)) || G.passFuriten.bottom || G.tempFuriten.bottom;
       hint.textContent = `🎯 テンパイ中! 待ち: ${waitsLabel(waits)}${furiten ? ' ⚠️フリテン(ロン不可)' : ''}`;
     } else {
       hint.textContent = '⏳ ツモ待ち…';
@@ -1924,7 +1938,7 @@ function renderRiichiGuide() {
       el.appendChild(c);
     });
     if (withFuriten) {
-      const furiten = G.rivers.bottom.some(t => waits.includes(t.id)) || G.passFuriten || G.tempFuriten;
+      const furiten = G.rivers.bottom.some(t => waits.includes(t.id)) || G.passFuriten.bottom || G.tempFuriten.bottom;
       if (furiten) {
         const f = document.createElement('span');
         f.className = 'riichi-guide__furiten';
@@ -2155,7 +2169,7 @@ function checkRonForSeat(seat, fromSeat, tile, isChankan = false) {
   if (!isWinning(test)) return null;
   // フリテン: 自河に待ち牌 / 見逃しフリテン (自家のみ)
   if (isFuriten(seat)) return null;
-  if (seat === 'bottom' && (G.passFuriten || G.tempFuriten)) return null;
+  if (G.passFuriten[seat] || G.tempFuriten[seat]) return null;  // 見逃しフリテン (全席)
   const ctx = {
     isTsumo: false, isRiichi: G.isRiichi[seat], isOya: G.oya === seat, seatWind: seatWindOf(seat),
     doraIndicator: G.doraIndicator, uraIndicator: G.uraIndicator, kanDora: G.kanDoraInd, kanUra: kanUraNow(), extraTiles: meldExtraTiles(seat), openMeldIds: openMeldIds(seat), kitas: G.kitas[seat], round: G.round,
@@ -2191,6 +2205,11 @@ function attemptDiscard(tile) {
   if (!hasDrawn('bottom')) return false;
   if (G.isRiichi.bottom && G.justRiichiDeclared !== 'bottom') return false;  // リーチ後は自動進行に任せる
   if (!G.hands.bottom.includes(tile)) return false;
+  // 喰い替え禁止: ポンした牌と同じ牌は その直後の打牌で捨てられない (実ルール)
+  if (G.kuikaeBan && G.kuikaeBan.seat === 'bottom' && tile.id === G.kuikaeBan.id) {
+    toast(`喰い替え禁止 — ポンした ${TILE_NAMES[tile.id]} と同じ牌は捨てられません`);
+    return false;
+  }
   // リーチ宣言直後: テンパイが崩れる牌は 捨てられない
   if (G.justRiichiDeclared === 'bottom') {
     const rest = G.hands.bottom.filter(t => t !== tile);
@@ -2208,7 +2227,7 @@ function attemptDiscard(tile) {
   toast(`あなたが ${TILE_NAMES[tile.id]} を打牌`);
   renderAll();
   // CPU/リモートがロンした場合 (busy/roundOver/オファー中) は ターン進行しない
-  if (G.roundOver || G.busy || netOfferPending()) return true;
+  if (G.roundOver || G.busy || G.ronQueue || netOfferPending()) return true;
   setTimeout(() => { nextTurn(); startTurn(); }, 120);
   return true;
 }
@@ -2269,6 +2288,7 @@ function drawTile(seat) {
   if (G.drawTiles.length === 0) return null;
   const tile = G.drawTiles.shift();
   G.justKanDrawn = null;  // 通常ツモで嶺上フラグ解除
+  G.tempFuriten[seat] = false;  // 見逃しフリテン (同巡) は 自分のツモで解除 (全席)
   G.hands[seat].push(tile);
   G.justDrawnAll[seat] = G.hands[seat].length - 1;
   if (seat === 'bottom') G.justDrawn = G.hands.bottom.length - 1;
@@ -2305,38 +2325,108 @@ function discardTile(seat, tile) {
   for (const p of ALL_SEATS) {
     if (G.riichiTurnsLeft[p] > 0) G.riichiTurnsLeft[p]--;
   }
-  // 全家のロン判定 (反時計回り順で 一番先の家が優先、 簡略は順次見て 最初に見つかった家)
-  const ccw = ccwFrom(seat);
-  for (let i = 1; i < 4; i++) {
-    const checkSeat = ccw[i];
-    if (checkSeat === G.emptySeat) continue;
-    const ronCheck = checkRonForSeat(checkSeat, seat, tile);
-    if (ronCheck) {
-      if (checkSeat === 'bottom') {
-        // 自家ロン: ボタン待ち
-        G.pendingRon = { fromSeat: seat, tile };
-        G.busy = true;
-        playSE('alert');
-        toast(`ロン可! 「ロン」 ボタンで あがれます`);
-      } else if (NETQ() && NETQ().isRemoteSeat(checkSeat)) {
-        // リモート人間: ロンオファーを送って本人の選択待ち (時間切れ=見逃し)
-        toast(`${seatLabel(checkSeat)} ロン確認中…`);
-        NETQ().offerRon(checkSeat, seat, tile);
-      } else {
-        // CPU ロン: 自動宣言 (roundOver で 以降のターン進行を停止)
-        const test = [...G.hands[checkSeat], tile];
-        announce('ron');
-        toast(`${seatLabel(checkSeat)} ロン! (${TILE_NAMES[tile.id]})`);
-        G.busy = true;
-        G.roundOver = true;
-        setTimeout(() => showWinModal(checkSeat, test, ronCheck.ctx, ronCheck.result), 600);
-      }
-      return true;
-    }
-  }
+  // 喰い替え禁止は 何かを捨てた時点で解除 (禁止牌の enforcement は attemptDiscard/cpuDiscard 側)
+  if (G.kuikaeBan && G.kuikaeBan.seat === seat) G.kuikaeBan = null;
+  // 全家のロン判定 (ダブロン対応: 候補全員に反時計回り順で確認 → 全員の返答が揃ってから確定)
+  if (beginRonResolution(seat, tile)) return true;
   // ロンなし → ポン/明槓チェック (鳴きオプション時のみ)
   checkCallsAfterDiscard(seat, tile);
   return true;
+}
+
+// ─── ロン確認キュー (ダブロン対応) ────────────────
+// 候補全席の ctx/result を打牌時点で確定し、 反時計回り順に 1人ずつ意思確認
+// (CPU=即ロン / 人間=ボタン / リモート=オファー)。 確定牌はこの時点の状態で評価済みのため、
+// 先に付ける見逃しフリテンが 受諾者のロンを妨げない
+function beginRonResolution(fromSeat, tile) {
+  const ccw = ccwFrom(fromSeat);
+  const entries = {};
+  const order = [];
+  const furitenMarks = [];
+  for (let i = 1; i < 4; i++) {
+    const s = ccw[i];
+    if (s === G.emptySeat) continue;
+    // 見逃しフリテン対象: 13枚形で待ちに この牌を含む全席 (役なしで拾えない場合も含む — 実ルール)
+    if (G.hands[s].length === handFullCount(s) - 1) {
+      const waits = waitingIds(G.hands[s], meldTriples(s));
+      if (waits.includes(tile.id)) furitenMarks.push(s);
+    }
+    const rc = checkRonForSeat(s, fromSeat, tile);
+    if (rc) {
+      entries[s] = rc;
+      order.push(s);
+    }
+  }
+  // フリテン付与 (ロンした席は局終了で無意味、 見逃し/役なし通過の席に効く)
+  for (const s of furitenMarks) {
+    if (G.isRiichi[s]) G.passFuriten[s] = true;
+    else G.tempFuriten[s] = true;
+  }
+  if (order.length === 0) return false;
+  G.ronQueue = { fromSeat, tile, entries, pending: order, accepted: [] };
+  G.busy = true;
+  processRonQueue();
+  return true;
+}
+
+function processRonQueue() {
+  const q = G.ronQueue;
+  if (!q || G.roundOver) return;
+  while (q.pending.length > 0) {
+    const seat = q.pending[0];
+    if (seat === 'bottom' && !(NETQ() && NETQ().isGuest())) {
+      // 人間 (ソロ/ホスト): 既存のロン/見逃すUIで確認
+      G.pendingRon = { fromSeat: q.fromSeat, tile: q.tile };
+      playSE('alert');
+      toast('ロン可! 「ロン」 ボタンで あがれます');
+      renderAll();
+      return;
+    }
+    if (NETQ() && NETQ().isRemoteSeat(seat)) {
+      toast(`${seatLabel(seat)} ロン確認中…`);
+      NETQ().offerRon(seat, q.fromSeat, q.tile);
+      return;
+    }
+    // CPU: 常にロン
+    q.pending.shift();
+    q.accepted.push(seat);
+  }
+  finalizeRonQueue();
+}
+
+// 現在確認中の席の意思決定 (human ボタン / netgame オファー応答・時間切れ から呼ばれる)
+function ronQueueDecide(seat, accept) {
+  const q = G.ronQueue;
+  if (!q || q.pending[0] !== seat) return;
+  q.pending.shift();
+  if (accept) q.accepted.push(seat);
+  processRonQueue();
+}
+
+function finalizeRonQueue() {
+  const q = G.ronQueue;
+  G.ronQueue = null;
+  if (!q || G.roundOver) return;
+  const winners = q.accepted.map(s => ({ seat: s, ctx: q.entries[s].ctx, result: q.entries[s].result }));
+  if (winners.length === 0) {
+    // 全員見逃し → 進行再開
+    G.busy = false;
+    renderAll();
+    setTimeout(() => { nextTurn(); startTurn(); }, 120);
+    return;
+  }
+  G.roundOver = true;
+  G.busy = true;
+  announce('ron');
+  if (winners.length === 1) {
+    const w = winners[0];
+    toast(`${seatLabel(w.seat)} ロン! (${TILE_NAMES[q.tile.id]})`);
+    const test = [...G.hands[w.seat], q.tile, ...meldTriples(w.seat)];
+    setTimeout(() => showWinModal(w.seat, test, w.ctx, w.result), 600);
+  } else {
+    toast(`ダブルロン! (${winners.map(w => seatShareLabel(w.seat)).join(' と ')})`);
+    setTimeout(() => showDoubleRonModal(winners, q.fromSeat, q.tile), 600);
+  }
 }
 
 // ─── 嶺上ツモ + 王牌14枚維持 (実麻雀ルール) ─────────
@@ -2348,7 +2438,7 @@ function canRinshanDraw() {
 // カン可能条件: 嶺上補充可 + カンドラの残りめくり枠あり (王牌レイアウト上 1局最大3回)
 // ※ net ゲストは kanDoraDefs を持たない (ホスト専有) ため 空配列は既定値3枚にフォールバック
 function kanAllowed() {
-  const max = (G.kanDoraDefs && G.kanDoraDefs.length > 0) ? G.kanDoraDefs.length : 3;
+  const max = (G.kanDoraDefs && G.kanDoraDefs.length > 0) ? G.kanDoraDefs.length : 4;
   return canRinshanDraw() && (G.kanDoraInd || []).length < max;
 }
 // 嶺上から1枚ツモ → 海底牌で王牌補充。 戻り値 = 補充ツモした牌
@@ -2583,6 +2673,7 @@ function doPon(seat, fromSeat, tile) {
   G.melds[seat].push({ type: 'pon', id: tile.id, tiles: [...own, tile], from: fromSeat });
   for (const p of ALL_SEATS) G.riichiTurnsLeft[p] = 0;  // 一発消し
   if (G.lastDiscard === tile) G.lastDiscard = null;
+  G.kuikaeBan = { seat, id: tile.id };  // 喰い替え禁止: 鳴いた牌と同じ牌はこの打牌で捨てられない
   G.turn = seat;
   delete G.justDrawnAll[seat];
   if (seat === 'bottom') { G.justDrawn = null; G.selected = null; }
@@ -2630,7 +2721,6 @@ function startTurn() {
   if (G.drawTiles.length === 0) return endRound('流局');
   if (G.turn === 'bottom') {
     drawTile('bottom');
-    G.tempFuriten = false;  // 見逃しフリテン (同巡) は 自分のツモで 解除
     renderAll();
     // リーチ後 自家: 北なら自動北抜き → ツモあがり可能なら ツモボタン待ち → それ以外は 自動ツモ切り
     // ※ リーチ宣言直後 (= まだ宣言牌を捨てていない) は スキップ (ユーザーが自分で1枚選んで捨てる)
@@ -2697,7 +2787,7 @@ function handleRiichiAutoBottom() {
     discardTile('bottom', drawnTile);
     toast(`(リーチ自動打牌) ${TILE_NAMES[drawnTile.id]}`);
     renderAll();
-    if (G.pendingRon || G.pendingCall || G.roundOver || netOfferPending()) return;  // ロン発生時は 進行停止
+    if (G.pendingRon || G.pendingCall || G.ronQueue || G.roundOver || netOfferPending()) return;  // ロン発生時は 進行停止
     G.busy = false;
     setTimeout(() => { nextTurn(); startTurn(); }, 120);
   }, 300);
@@ -2795,7 +2885,7 @@ function cpuDiscard(seat, forceTsumoTile = false) {
     discardTile(seat, tile);
     toast(`${seatLabel(seat)} (リーチ自動) ${TILE_NAMES[tile.id]}`);
     renderAll();
-    if (G.pendingRon || G.pendingCall || G.roundOver || netOfferPending()) return;
+    if (G.pendingRon || G.pendingCall || G.ronQueue || G.roundOver || netOfferPending()) return;
     G.busy = false;
     setTimeout(() => { nextTurn(); startTurn(); }, 120);
     return;
@@ -2805,6 +2895,11 @@ function cpuDiscard(seat, forceTsumoTile = false) {
   if (G.justRiichiDeclared === seat) {
     const keep = pool.filter(t => isTenpai13(G.hands[seat].filter(x => x !== t), meldTriples(seat)));
     if (keep.length > 0) pool = keep;
+  }
+  // 喰い替え禁止: ポン直後は鳴いた牌と同じ牌を捨てられない
+  if (G.kuikaeBan && G.kuikaeBan.seat === seat) {
+    const legal = pool.filter(t => t.id !== G.kuikaeBan.id);
+    if (legal.length > 0) pool = legal;
   }
   // シャンテン数が最小になる捨て牌を選ぶ (= 手が進む打牌)。
   // 強すぎ防止: 15% の確率で 「min+1 まで許容」 の気まぐれ打牌
@@ -2833,7 +2928,7 @@ function cpuDiscard(seat, forceTsumoTile = false) {
   toast(`${seatLabel(seat)} が ${TILE_NAMES[target.id]} を打牌`);
   renderAll();
   // ロン保留 / リモートロンオファー / 局終了なら ターン進行を停止
-  if (G.pendingRon || G.pendingCall || G.roundOver || netOfferPending()) return;
+  if (G.pendingRon || G.pendingCall || G.ronQueue || G.roundOver || netOfferPending()) return;
   G.busy = false;
   setTimeout(() => { nextTurn(); startTurn(); }, 120);
 }
@@ -3175,6 +3270,103 @@ function showWinModal(seat, hand, context, result) {
   }, WIN_REVEAL_MS);
 }
 
+// ─── ダブロン リザルト (2人同時ロン — 供託・本場は上家取り = 討ち取り順で先の勝者) ───
+function showDoubleRonModal(winners, fromSeat, tile) {
+  const overlay = document.getElementById('end-overlay');
+  const titleEl = document.getElementById('end-title');
+  const textEl = document.getElementById('end-text');
+  if (!overlay || !titleEl || !textEl) return;
+  G.roundOver = true;
+  G.busy = true;
+  // 牌譜: 自分が勝者に含まれる → win / 自分の放銃 → dealin
+  let kifuNetSummary = null;
+  try {
+    kifuNetSummary = {
+      double: true, fromSeat,
+      winnerSeat: winners[0].seat,
+      winnerSeats: winners.map(w => w.seat),
+      winnerLabel: winners.map(w => seatShareLabel(w.seat)).join('・'),
+      winType: 'ロン',
+      tier: winners.map(w => hanToTier(w.result.han, w.result.isYakuman)).join(' + '),
+      yaku: winners.flatMap(w => w.result.yakuList.map(y => y.name)).slice(0, 8),
+      winTileId: tile.id,
+      winnerHand: sortHand([...G.hands[winners[0].seat], tile].filter(t => t && t.id != null)).map(t => t.id),
+      chankan: false,
+    };
+    const mine = winners.find(w => w.seat === 'bottom');
+    if (mine) {
+      kifuFinishRound('win', { ...kifuNetSummary, winnerSeat: 'bottom', tier: hanToTier(mine.result.han, mine.result.isYakuman), yaku: mine.result.yakuList.map(y => y.name) });
+    } else if (fromSeat === 'bottom') {
+      kifuFinishRound('dealin', kifuNetSummary);
+    }
+    const kifuBtn = document.getElementById('end-kifu');
+    if (kifuBtn && KIFU.lastSaved) kifuBtn.hidden = false;
+  } catch (e) { /* 牌譜失敗でも表示は続行 */ }
+  renderAll();
+
+  // リーチ宣言牌への放銃: リーチ不成立 (差し戻し)
+  if (tile.isRiichiDeclared && G.isRiichi[fromSeat] && G.kyotaku >= 1000) {
+    G.isRiichi[fromSeat] = false;
+    G.doubleRiichi[fromSeat] = false;
+    G.riichiTurnsLeft[fromSeat] = 0;
+    G.scores[fromSeat] += 1000;
+    G.kyotaku -= 1000;
+  }
+  // 点数移動: 1人目 (討ち取り順で上家) が 本場・供託を総取り、 2人目は素点のみ
+  const totals = {};
+  ALL_SEATS.forEach(s => { totals[s] = 0; });
+  const t1 = applyWinScore(winners[0].seat, { isTsumo: false, fromSeat }, winners[0].result);
+  Object.keys(t1).forEach(s => { totals[s] += t1[s]; });
+  const savedHonba = G.honba;
+  G.honba = 0;  // 2人目には本場を付けない (供託は1人目が回収済みで0)
+  const t2 = applyWinScore(winners[1].seat, { isTsumo: false, fromSeat }, winners[1].result);
+  G.honba = savedHonba;
+  Object.keys(t2).forEach(s => { totals[s] += t2[s]; });
+  // 連荘判定: 勝者に親が含まれれば連荘
+  if (winners.some(w => w.seat === G.oya)) {
+    G.honba++;
+    G.lastResult = 'oyaWin';
+  } else {
+    G.honba = 0;
+    G.lastResult = 'koWin';
+  }
+
+  titleEl.textContent = `🎉 ダブルロン! ${winners.map(w => seatShareLabel(w.seat)).join(' と ')}`;
+  const playing = ALL_SEATS.filter(s => s !== G.emptySeat);
+  let html = '';
+  for (const w of winners) {
+    const tier = hanToTier(w.result.han, w.result.isYakuman);
+    const handTiles = sortHand([...G.hands[w.seat]]);
+    html += '<div style="background:rgba(0,0,0,0.3); border:1px solid #4a6; border-radius:8px; padding:8px 10px; margin:6px 0; text-align:left;">';
+    html += `<div style="font-size:13px;"><b style="color:#ffeb3b;">${seatShareLabel(w.seat)}</b> — ${tier} (${w.result.isYakuman ? '役満' : w.result.han + '翻'})</div>`;
+    html += '<div style="margin:5px 0; line-height:1; text-align:center;">';
+    html += handTiles.map(t => tileSpanHtml(t, 'width:20px; height:27px;')).join('');
+    html += '<span style="display:inline-block; width:8px;"></span>';
+    html += tileSpanHtml(tile, 'width:20px; height:27px; box-shadow: 0 0 0 2px #ff9800, 0 0 8px rgba(255,152,0,0.9);');
+    html += '</div>';
+    html += `<div style="font-size:11px; color:#dde;">${w.result.yakuList.map(y => `${y.name}<small>(${y.han}翻)</small>`).join(' / ')}</div>`;
+    html += '</div>';
+  }
+  html += '<div style="background:rgba(76,175,80,0.12); padding:6px 8px; border-radius:6px; margin:6px 0; text-align:left; font-size:11px;">';
+  html += '<b style="color:#4caf50;">点数移動:</b> ';
+  html += playing.filter(s => totals[s] !== 0)
+    .map(s => `${seatShareLabel(s)} <b style="color:${totals[s] > 0 ? '#ffeb3b' : '#ff8a80'};">${totals[s] > 0 ? '+' : ''}${totals[s].toLocaleString()}</b>`)
+    .join(' / ');
+  html += '<br><b style="color:#4caf50;">現スコア:</b> ';
+  html += playing.map(s => `${seatShareLabel(s)}=${G.scores[s].toLocaleString()}`).join(' / ');
+  html += `<br><small style="color:#9ab;">※ 本場・供託は 討ち取り順で先の ${seatShareLabel(winners[0].seat)} が受け取ります (上家取り)</small>`;
+  html += '</div>';
+
+  setTimeout(() => showScoreBadges(totals), 700);
+  setTimeout(() => {
+    playSE('win');
+    textEl.innerHTML = html;
+    renderAll();
+    overlay.hidden = false;
+    if (NETQ()) NETQ().onWinModal(titleEl.textContent, html, kifuNetSummary);
+  }, 2600);
+}
+
 // 三麻 半荘 = 東3+南3 = 6局
 const ROUND_ORDER = ['東1', '東2', '東3', '南1', '南2', '南3'];
 function nextRound() {
@@ -3288,8 +3480,10 @@ function startNewRound() {
   G.justKanDrawn = null;
   G.justRiichiDeclared = null;
   G.roundOver = false;
-  G.passFuriten = false;
-  G.tempFuriten = false;
+  G.passFuriten = { bottom: false, right: false, top: false, left: false };
+  G.tempFuriten = { bottom: false, right: false, top: false, left: false };
+  G.ronQueue = null;
+  G.kuikaeBan = null;
   G.lastDiscard = null;
   const nextBtn = document.getElementById('end-next');
   if (nextBtn) nextBtn.style.display = '';
@@ -3389,7 +3583,7 @@ async function showDiceCeremony(preset) {
 
   counterEl.hidden = false;
   titleEl.textContent = '👉 起点家の山の右端から数えます';
-  explainEl.textContent = `右端から ${total} 幢 数えた位置で カット → カットの右隣 7幢 (14牌) が「王牌」、 その中央上段が「ドラ表示」`;
+  explainEl.textContent = `右端から ${total} 幢 数えた位置で カット → カットの右隣 7幢 (14牌) が「王牌」、 割れ目から3幢目の上段が「ドラ表示」`;
 
   // カウントアニメ: 起点家の山の 「右端から N幢目」 を 順に ハイライト (視覚的に)
   // DOM 順 (= append 順) は dou0_top, dou0_bot, ..., dou12_top, dou12_bot, dou13_top
@@ -3424,7 +3618,7 @@ async function showDiceCeremony(preset) {
   G._doraRevealPending = false;  // めくり演出の瞬間 — ここで初めてドラ表示牌を公開 (ゲスト先見え防止)
   renderWalls();  // 王牌 (紫) + ドラ表示牌 (表向き) を 山に反映
   titleEl.textContent = '✨ 王牌+ドラ表示 決定!';
-  explainEl.textContent = `紫の 7幢 (14牌) が王牌。 その中央で 表向きになっている牌が ドラ表示です。`;
+  explainEl.textContent = `紫の 7幢 (14牌) が王牌。 割れ目から3幢目で 表向きになっている牌が ドラ表示です (割れ目側の2幢は カン・北抜き用の嶺上牌)。`;
   counterEl.hidden = true;
   if (isGuestView) {
     // ゲストは配牌の権限なし: ホストの配牌 (phase=play の pub) を待って自動で閉じる
@@ -3628,7 +3822,7 @@ function toast(text) {
 // ─── オンボーディング ───────────────────────
 const GUIDE_STEPS = [
   { title: '配牌完了!', text: '画面下=「あなた (親、 東家)」、 左=上家、 上=対面、 右=下家。 三麻なので 他家は2人で、 残り1家は空席ですが 山だけあります。' },
-  { title: '🎲 サイコロで起点家+カット位置', text: '親がサイコロ2個を振り、 出目で 起点家を決定 + 起点家の山の右端から出目数の位置で カット → カット右隣の7幢 (14牌) が王牌、 その中央上段がドラ表示。' },
+  { title: '🎲 サイコロで起点家+カット位置', text: '親がサイコロ2個を振り、 出目で 起点家を決定 + 起点家の山の右端から出目数の位置で カット → カット右隣の7幢 (14牌) が王牌、 割れ目から3幢目の上段がドラ表示 (実際の麻雀と同じ)。' },
   { title: '🟡 卓全体で1つの山', text: '4家それぞれ前に27牌の山。 ツモは 起点家のカット位置から反時計回りに進みます。' },
   { title: '🀃 北抜き', text: '北 (🀃) を引いたら「北抜き」 で抜き、 王牌末尾 (嶺上) から補充自摸。 抜くたび1翻 (関西ルール)。' },
   { title: '✨ 全部赤ドラ', text: '5筒×4枚 + 5索×4枚 = 計8枚 全赤ドラ。 引いただけで 1翻ずつ加算。' },
@@ -3799,24 +3993,36 @@ if (document.getElementById('table')) {
     document.getElementById('btn-ron')?.addEventListener('click', () => {
       if (!G.pendingRon || G.roundOver) return;
       const { tile, fromSeat, chankan } = G.pendingRon;
-      const test = [...G.hands.bottom, tile, ...meldTriples('bottom')];
-      const ctx = { isTsumo: false, isRiichi: G.isRiichi.bottom, isOya: G.oya === 'bottom', seatWind: seatWindOf('bottom'),
-                    doraIndicator: G.doraIndicator, uraIndicator: G.uraIndicator, kanDora: G.kanDoraInd, kanUra: kanUraNow(), extraTiles: meldExtraTiles('bottom'), openMeldIds: openMeldIds('bottom'), kitas: G.kitas.bottom, round: G.round,
-                    isDoubleRiichi: G.doubleRiichi.bottom, firstDraw: G.rivers.bottom.length === 0 && G.kitas.bottom === 0, isHaitei: G.drawTiles.length === 0, isIppatsu: G.riichiTurnsLeft.bottom > 0, winTile: tile, fromSeat,
-                    isChankan: !!chankan };
-      const result = calcYaku(test, ctx);
-      if (result.error) { toast(result.error); return; }
-      if (NETQ() && NETQ().isGuest()) { NETQ().guestAction('ron'); return; }  // 演出はホスト確定後にイベントで届く
-      // 搶槓: 加槓牌はロン者へ渡る (加槓者の手牌から除去、 加槓は不成立のまま)
-      if (chankan && G.pendingKakan) {
-        const hi = G.hands[fromSeat].indexOf(tile);
-        if (hi >= 0) G.hands[fromSeat].splice(hi, 1);
-        G.pendingKakan = null;
+      if (NETQ() && NETQ().isGuest()) {
+        // ゲスト: 軽い事前チェックのみ (確定判定はホスト)
+        const test0 = [...G.hands.bottom, tile, ...meldTriples('bottom')];
+        if (!isWinning(test0)) return;
+        NETQ().guestAction('ron');
+        return;
       }
+      if (chankan) {
+        // 搶槓 (単独ロンのみ): 加槓牌はロン者へ渡る (加槓者の手牌から除去、 加槓は不成立のまま)
+        const test = [...G.hands.bottom, tile, ...meldTriples('bottom')];
+        const ctx = { isTsumo: false, isRiichi: G.isRiichi.bottom, isOya: G.oya === 'bottom', seatWind: seatWindOf('bottom'),
+                      doraIndicator: G.doraIndicator, uraIndicator: G.uraIndicator, kanDora: G.kanDoraInd, kanUra: kanUraNow(), extraTiles: meldExtraTiles('bottom'), openMeldIds: openMeldIds('bottom'), kitas: G.kitas.bottom, round: G.round,
+                      isDoubleRiichi: G.doubleRiichi.bottom, firstDraw: G.rivers.bottom.length === 0 && G.kitas.bottom === 0, isHaitei: G.drawTiles.length === 0, isIppatsu: G.riichiTurnsLeft.bottom > 0, winTile: tile, fromSeat,
+                      isChankan: true };
+        const result = calcYaku(test, ctx);
+        if (result.error) { toast(result.error); return; }
+        if (G.pendingKakan) {
+          const hi = G.hands[fromSeat].indexOf(tile);
+          if (hi >= 0) G.hands[fromSeat].splice(hi, 1);
+          G.pendingKakan = null;
+        }
+        G.pendingRon = null;
+        G.busy = false;
+        announce('ron');
+        showWinModal('bottom', test, ctx, result);
+        return;
+      }
+      // 通常ロン: キューに受諾を伝える (ダブロンの可能性があるため直接あがらない)
       G.pendingRon = null;
-      G.busy = false;
-      announce('ron');
-      showWinModal('bottom', test, ctx, result);
+      ronQueueDecide('bottom', true);
     });
     document.getElementById('btn-pass')?.addEventListener('click', () => {
       // ポン/明槓のスルー
@@ -3834,16 +4040,16 @@ if (document.getElementById('table')) {
       appConfirm('<b>あがれる牌です。</b>本当に見逃しますか?<br>見逃すと フリテンになり しばらくロンできません', () => {
         if (!G.pendingRon || G.roundOver) return;  // 確認中にオファー時間切れ等で消えた場合
         if (NETQ() && NETQ().isGuest()) { NETQ().guestAction('pass'); return; }
-        // 見逃し: リーチ中は この局ずっとロン不可、 通常は 次の自摸まで ロン不可 (フリテン)
-        if (G.isRiichi.bottom) G.passFuriten = true;
-        else G.tempFuriten = true;
         const wasChankan = !!G.pendingRon.chankan;
+        // 見逃しフリテン: 通常ロンは beginRonResolution で付与済み。 搶槓のみここで付与
+        if (wasChankan) {
+          if (G.isRiichi.bottom) G.passFuriten.bottom = true;
+          else G.tempFuriten.bottom = true;
+        }
         G.pendingRon = null;
-        G.busy = false;
         toast('見逃しました (フリテン: しばらくロンできません)');
-        if (wasChankan) { resumeAfterChankanPass(); return; }  // 加槓成立 → 加槓者のターン続行
-        renderAll();
-        setTimeout(() => { nextTurn(); startTurn(); }, 120);
+        if (wasChankan) { G.busy = false; resumeAfterChankanPass(); return; }  // 加槓成立 → 加槓者のターン続行
+        ronQueueDecide('bottom', false);
       }, '見逃す', 'やめる');
     });
     document.getElementById('btn-riichi')?.addEventListener('click', () => {
