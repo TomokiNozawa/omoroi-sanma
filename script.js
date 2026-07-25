@@ -1412,6 +1412,44 @@ function coachSafetyCore(tile, riichiRivers, remainOf) {
 // hand14 = 手牌14枚相当 / melds3 = 副露の3枚等価 / tile = 検討する捨て牌 (hand14内のオブジェクト)
 // remainOf(id) = 残枚数取得 / riichiRivers = リーチ中他家の河 (id配列の配列)
 // 戻り値: { mark, cls, msg, safety } / null
+// ─── 採点に使う補助評価 ────────────────────────
+// 危険度 (数字が大きいほど危険)。 coachSafetyCore と同じ判定を数値化したもの
+function coachDangerOf(tile, riichiRivers, remainOf) {
+  if (!riichiRivers || riichiRivers.length === 0) return 0;
+  if (riichiRivers.every(riv => riv.includes(tile.id))) return 0;      // 現物
+  if (isJihaiId(tile.id)) return remainOf(tile.id) <= 1 ? 1 : 2;       // 字牌
+  const n = tileNum(tile.id);
+  if (n != null && (isPinId(tile.id) || isSouId(tile.id))) {
+    const base = isPinId(tile.id) ? 1 : 10;
+    const sujiOk = riichiRivers.every(riv => {
+      const rs = new Set(riv);
+      if (n <= 3) return rs.has(base + n + 3);
+      if (n >= 7) return rs.has(base + n - 3);
+      return rs.has(base + n - 3) && rs.has(base + n + 3);
+    });
+    if (sujiOk) return 3;                                              // スジ
+  }
+  return 5;                                                            // 無スジ
+}
+// 手牌のドラ枚数 (表ドラ + 赤ドラ)。 打点の目安に使う
+function coachDoraCount(hand) {
+  const red = hand.filter(t => t.isRed).length;
+  return countDora(hand, G.doraIndicator) + red;
+}
+// テンパイ時の待ちの良し悪し。 待ちが2種類以上なら両面/三面張とみなす (初心者向けの簡易判定)
+function coachShapeOf(hand13, melds3, remainOf) {
+  const waits = waitingIds(hand13, melds3);
+  if (!waits.length) return null;
+  const total = waits.reduce((n, id) => n + Math.max(0, remainOf(id)), 0);
+  return { waits, total, good: waits.length >= 2 };
+}
+// タンヤオを狙える手か (幺九牌が少なければ狙い目)
+function coachTanyaoHint(hand13, melds3) {
+  const all = hand13.concat(melds3);
+  const yao = all.filter(t => YAOCHU_IDS.has(t.id)).length;
+  return { yao, canTanyao: yao === 0 };
+}
+
 function coachAnalyzeCore(hand14, melds3, tile, remainOf, riichiRivers) {
   const evals = hand14.map(t => ({ t, sh: shantenOf(hand14.filter(x => x !== t).concat(melds3)) }));
   const minSh = Math.min(...evals.map(e => e.sh));
@@ -1436,6 +1474,27 @@ function coachAnalyzeCore(hand14, melds3, tile, remainOf, riichiRivers) {
   };
   let grade, msg;
   const selName = TILE_NAMES[tile.id];
+  const hand13 = hand14.filter(x => x !== tile);
+  const underRiichi = !!(riichiRivers && riichiRivers.length);
+  const dangerOf = (t) => coachDangerOf(t, riichiRivers, remainOf);
+  const myDanger = dangerOf(tile);
+  const safety = coachSafetyCore(tile, riichiRivers, remainOf);
+  const done = (mark, cls, m) => ({ mark, cls, msg: m, safety });
+
+  // ── ① 押し引き (他家リーチ中は これを最優先で見る) ──
+  // 2シャンテン以上からリーチに追いつくのは難しい。 初心者はまず「降りる」を覚える
+  if (underRiichi && minSh >= 2) {
+    const safest = evals.reduce((a, b) => (dangerOf(b.t) < dangerOf(a.t) ? b : a), evals[0]);
+    const safestDanger = dangerOf(safest.t);
+    if (myDanger >= 5 && safestDanger <= 3) {
+      return done('✖', 'bad', `<b>降りましょう</b> — ${minSh}シャンテンではリーチに追いつけません。`
+        + `<b>${TILE_NAMES[safest.t.id]}</b>なら安全でした`);
+    }
+    if (myDanger === 0) return done('◎', 'best', `ナイス — 現物で安全に。${minSh}シャンテンなら降りが正解です`);
+    if (myDanger <= 3) return done('○', 'good', `安全寄りでOK — ${minSh}シャンテンなら無理に押さないのが基本`);
+  }
+
+  // ── ② 手作りの評価 (シャンテン → 受け入れ) ──
   if (chosen.sh > minSh) {
     const bests = evals.filter(e => e.sh === minSh);
     const best = bests.reduce((a, b) => (ukeOf(b.t).total > ukeOf(a.t).total ? b : a), bests[0]);
@@ -1448,10 +1507,28 @@ function coachAnalyzeCore(hand14, melds3, tile, remainOf, riichiRivers) {
     const myUke = ukeOf(tile);
     const bestTotal = Math.max(...evals.filter(e => e.sh === minSh).map(e => ukeOf(e.t).total));
     if (minSh === 0) {
-      const waits = waitingIds(hand14.filter(x => x !== tile), melds3);
-      const wLabel = waits.map(id => TILE_NAMES[id]).join('・');
-      if (myUke.total >= bestTotal) { grade = ['◎', 'best']; msg = `最善! テンパイ — 待ち: ${wLabel} (残${myUke.total}枚)`; }
-      else { grade = ['○', 'good']; msg = `テンパイ — 待ち: ${wLabel} (残${myUke.total}枚)。 より広い待ちもありました (最大${bestTotal}枚)`; }
+      // ── 良形/愚形 ── 同じテンパイでも 待ちが2種類以上あるか (両面/三面張) で価値が違う
+      const shape = coachShapeOf(hand13, melds3, remainOf);
+      const wLabel = shape ? shape.waits.map(id => TILE_NAMES[id]).join('・') : '';
+      const shapeTag = shape ? (shape.good ? '<b>良い待ち</b>' : '愚形') : '';
+      // 他の切り方で良形テンパイに取れたか
+      const betterShape = evals.filter(e => e.sh === 0 && e.t !== tile).some(e => {
+        const s = coachShapeOf(hand14.filter(x => x !== e.t), melds3, remainOf);
+        return s && s.good && (!shape || !shape.good);
+      });
+      if (betterShape) {
+        const alt = evals.filter(e => e.sh === 0 && e.t !== tile)
+          .find(e => { const s = coachShapeOf(hand14.filter(x => x !== e.t), melds3, remainOf); return s && s.good; });
+        grade = ['△', 'ok'];
+        msg = `テンパイ (${shapeTag}: ${wLabel} 残${shape ? shape.total : 0}枚) — `
+          + `<b>${TILE_NAMES[alt.t.id]}</b>切りなら両面に取れました`;
+      } else if (myUke.total >= bestTotal) {
+        grade = ['◎', 'best'];
+        msg = `最善! テンパイ — ${shapeTag} ${wLabel} (残${myUke.total}枚)`;
+      } else {
+        grade = ['○', 'good'];
+        msg = `テンパイ — ${shapeTag} ${wLabel} (残${myUke.total}枚)。 より広い待ちもありました (最大${bestTotal}枚)`;
+      }
     } else if (myUke.total >= bestTotal) {
       grade = ['◎', 'best']; msg = `最善です! 受け入れ${myUke.total}枚`;
     } else if (bestTotal - myUke.total <= 4) {
@@ -1461,7 +1538,21 @@ function coachAnalyzeCore(hand14, melds3, tile, remainOf, riichiRivers) {
       grade = ['△', 'ok']; msg = `おしい — <b>${TILE_NAMES[best.t.id]}</b>切りなら受け入れ${bestTotal}枚 (今回${myUke.total}枚)`;
     }
   }
-  return { mark: grade[0], cls: grade[1], msg, safety: coachSafetyCore(tile, riichiRivers, remainOf) };
+
+  // ── ③ 打点と役の補足 ── 手の進み具合とは別に、損している時だけ添える
+  const notes = [];
+  const doraId = G.doraIndicator ? nextTileId(G.doraIndicator.id) : null;
+  if (tile.isRed) notes.push('🀄 <b>赤ドラ</b>を切りました — 打点が1翻下がります');
+  else if (doraId != null && tile.id === doraId) notes.push('🀄 <b>ドラ</b>を切りました — 打点が1翻下がります');
+  // タンヤオ: 幺九牌が1枚だけ残る形なら それを切ればタンヤオが見える
+  if (!notes.length && minSh >= 1 && chosen.sh === minSh) {
+    const after = coachTanyaoHint(hand13, melds3);
+    if (after.canTanyao) notes.push('✨ 幺九牌が無くなりました — <b>タンヤオ</b>が狙えます');
+    else if (after.yao === 1 && !YAOCHU_IDS.has(tile.id)) {
+      notes.push('💡 幺九牌が1枚だけ — それを払えば <b>タンヤオ</b>が見えます');
+    }
+  }
+  return { mark: grade[0], cls: grade[1], msg, safety, notes };
 }
 
 // 打牌評価本体 (ライブ🎓): 実際に捨てる直前 (手牌14枚のうち) に呼ぶ。
@@ -1477,6 +1568,7 @@ function coachEvaluateDiscard(tile) {
     if (!r) return;
     let html = `<span class="coach-grade coach-grade--${r.cls}">${r.mark}</span> ${r.msg}`;
     if (r.safety) html += `<span class="coach-safety">${r.safety}</span>`;
+    for (const n of (r.notes || [])) html += `<span class="coach-note">${n}</span>`;
     showCoach(html);
   } catch (e) { /* 評価失敗でもゲームは止めない */ }
 }
