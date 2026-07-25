@@ -17,6 +17,10 @@ body {
 .lobby__header { text-align: center; margin-bottom: 32px; }
 .lobby__title { font-size: 28px; margin: 0 0 8px; letter-spacing: 0.05em; }
 .lobby__subtitle { font-size: 12px; color: #aac; margin: 0; line-height: 1.5; }
+/* 360px 幅だと最後の1文字だけが折り返して落ちるので わずかに詰める */
+@media (max-width: 379px) {
+  .lobby__subtitle { font-size: 11px; letter-spacing: -0.2px; }
+}
 .lobby__menu { display: flex; flex-direction: column; gap: 12px; flex: 1; }
 .lobby__btn {
   display: grid; grid-template-columns: 48px 1fr; grid-template-rows: auto auto;
@@ -47,6 +51,14 @@ body {
 .game__turn { color: #4caf50; font-weight: bold; font-size: 11px; }
 .game__remain { margin-left: auto; color: #aac; font-size: 11px; }
 .game__guide-btn { background: none; border: 1px solid #4a6; color: #4a6; padding: 2px 6px; border-radius: 4px; cursor: pointer; font-size: 12px; }
+/* ヘッダーは高さが限られる (卓の面積を削れない) ので、 見た目は小さいまま
+   当たり判定を縦方向にだけ 44px へ広げる。
+   ⚠️ 横に広げると隣のボタン (⚙️と📚は 6px 間隔) と当たり判定が重なって誤爆するので広げない */
+.game__back, .game__guide-btn { position: relative; }
+.game__back::before, .game__guide-btn::before {
+  content: ''; position: absolute; left: 0; right: 0; top: 50%;
+  height: 44px; transform: translateY(-50%);
+}
 
 .game__hint {
   display: flex; align-items: center; justify-content: center;

@@ -128,16 +128,20 @@ function genTehai(players) {
   return { hand, han, isOya, players };
 }
 
-// 手牌の牌並び (表示用)。 あがり牌は末尾に分離して見せる
+// 手牌の牌並び (表示用)
 function handTiles(hand) {
-  const out = [];
+  return handGroups(hand).flat();
+}
+// 面子ごとに区切った並び。 区切りが見えると どの面子で何符ついたかを追いやすい
+function handGroups(hand) {
+  const groups = [];
   for (const m of hand.melds) {
-    if (m.type === 'shuntsu') out.push(m.id, m.id + 1, m.id + 2);
-    else if (m.type === 'koutsu') out.push(m.id, m.id, m.id);
-    else out.push(m.id, m.id, m.id, m.id);
+    if (m.type === 'shuntsu') groups.push([m.id, m.id + 1, m.id + 2]);
+    else if (m.type === 'koutsu') groups.push([m.id, m.id, m.id]);
+    else groups.push([m.id, m.id, m.id, m.id]);
   }
-  out.push(hand.pair, hand.pair);
-  return out;
+  groups.push([hand.pair, hand.pair]);   // 雀頭は最後
+  return groups;
 }
 
 function tileImgHtml(id, cls = '') {
@@ -146,8 +150,16 @@ function tileImgHtml(id, cls = '') {
 
 // ─── 選択肢 ────────────────────────────
 // 誤答は「ありがちな間違い」を混ぜる (符の取り違え・親子の取り違え・ツモロンの取り違え)
-function fuChoices(correct) {
-  const pool = [20, 25, 30, 40, 50, 60, 70, 80].filter(v => v !== correct);
+// hand を渡すと その手ではあり得ない符を誤答から外す。
+// 20符は平和ツモ専用・25符は七対子専用なので、面子手のロンに混ぜると
+// 「麻雀的にあり得ない選択肢」になり、消去法で解けてしまう
+function fuChoices(correct, hand) {
+  let pool = [20, 25, 30, 40, 50, 60, 70, 80, 90];
+  if (hand) {
+    if (!hand.isChiitoi) pool = pool.filter(v => v !== 25);
+    if (!(hand.isPinfu && hand.isTsumo)) pool = pool.filter(v => v !== 20);
+  }
+  pool = pool.filter(v => v !== correct);
   const near = pool.sort((a, b) => Math.abs(a - correct) - Math.abs(b - correct)).slice(0, 5);
   return shuffle([correct, ...shuffle(near).slice(0, 3)]);
 }
@@ -250,8 +262,10 @@ function renderQuestion() {
   // 手牌
   const handEl = $('drill-hand');
   if (q.kind === 'tehai') {
-    const tiles = handTiles(q.hand);
-    handEl.innerHTML = tiles.map(id => tileImgHtml(id)).join('');
+    // 面子ごとに包む (CSS 側で1行に収める。 枚数が増えると牌が自動で縮む)
+    handEl.innerHTML = handGroups(q.hand)
+      .map(g => `<span class="drill-hand__grp">${g.map(id => tileImgHtml(id)).join('')}</span>`)
+      .join('');
   } else {
     handEl.innerHTML = '';
   }
@@ -262,7 +276,7 @@ function renderQuestion() {
   ansEl.innerHTML = '';
   if (S.step === 'fu') {
     $('drill-ask').textContent = 'この手は何符?';
-    for (const v of fuChoices(q.calc.fu)) {
+    for (const v of fuChoices(q.calc.fu, q.hand)) {
       ansEl.appendChild(mkAnswer(`${v}符`, (btn) => answerFu(v, btn), null, v === q.calc.fu));
     }
   } else if (S.mode === 'split') {

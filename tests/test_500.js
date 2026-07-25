@@ -182,9 +182,13 @@ function loadDrill() {
     if (c.isTsumo && exp.each !== undefined && got.detail.fromKo !== exp.each) {
       bad.split.push(`#${i} ${c.fu}符${c.han}翻 親ツモ → 期待${exp.each}オール≠${got.detail.fromKo}`);
     }
-    // ③ 選択肢: 正解を含み4択か
-    const fch = D.fuChoices(c.fu);
+    // ③ 選択肢: 正解を含み4択か + その手であり得ない符を混ぜていないか
+    const fch = D.fuChoices(c.fu, q.hand);
     if (!fch.includes(c.fu) || fch.length !== 4) bad.choice.push(`#${i} 符の選択肢`);
+    if (!q.hand.isChiitoi && fch.includes(25)) bad.choice.push(`#${i} 面子手なのに25符(七対子)が選択肢に`);
+    if (!(q.hand.isPinfu && q.hand.isTsumo) && fch.includes(20)) {
+      bad.choice.push(`#${i} 平和ツモでないのに20符が選択肢に`);
+    }
     const sch = D.scoreChoices(q, got.total);
     if (!sch.includes(got.total) || sch.length !== 4) bad.choice.push(`#${i} 点数の選択肢`);
     // ④ 成立しない組み合わせを出していないか
