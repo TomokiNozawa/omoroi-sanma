@@ -152,6 +152,38 @@ const waitHtml = (inst) => (inst.dom._els['net-wait-modal'] || {}).innerHTML || 
       host.logs.calls.some(c => c.name === 'cpuDiscard'));
   }
 
+  console.log('\n── A. オファーに制限時間を設けない ──────────────');
+  {
+    // 旧実装は ロン10秒 / ポン5秒 で自動パスしていた。
+    // 考えている最中に見逃し扱いにされるのは体験として悪いので撤廃 (野沢さん指示)。
+    // 応答が返らないのは相手が落ちた時だけなので、そこは presence で解決する。
+    const store = new SharedStore();
+    const host = await bootHost(store);
+    const code = host.S.room;
+    await bootGuest(store, 'uid-g1', code, 'ゲスト1');
+    clickStart(host);
+    await sleep(20);
+    const seat = Object.keys(host.S.remoteSeats).find(s => host.S.remoteSeats[s] === 'uid-g1');
+    host.G.roundOver = false;
+
+    host.NetGame.offerRon(seat, 'bottom', { id: 20, copy: 0, isRed: false });
+    check('ロンオファーが立つ', !!host.S.pendingOffer);
+    await sleep(1500);
+    check('時間が経っても自動で見逃しにならない', !!host.S.pendingOffer,
+      '旧実装は10秒で自動パスしていた');
+
+    // 接続が切れたら 局が止まらないよう解決する
+    store.simulateDisconnect('uid-g1');
+    check('切断したらオファーが解決される', host.S.pendingOffer === null);
+    check('切断による解決が toast で知らされる',
+      host.logs.toast.some(t => /切断中/.test(t)), host.logs.toast.slice(-2).join(' / '));
+
+    // 既に切断が判っている席への新規オファーは その場で解決する (待つ意味がない)
+    host.G.roundOver = false;
+    host.NetGame.offerRon(seat, 'bottom', { id: 21, copy: 0, isRed: false });
+    check('切断が判っている席へのオファーは即解決', host.S.pendingOffer === null);
+  }
+
   console.log('\n── B. 山データ(wall)の分離 ─────────────────');
   {
     const store = new SharedStore();

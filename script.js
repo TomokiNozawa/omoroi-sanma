@@ -114,7 +114,9 @@ const G = {
   // カンドラ表示牌 (暗槓ごとに王牌からめくる、 中央+リザルトに表示)
   kanDoraInd: [],
   // ルールオプション (URL ?naki=0&tobi=0 で off、 既定 on。 net はホスト設定を pub で配布)
-  rules: { naki: true, tobi: true },
+  rules: { naki: true, tobi: true, kyuushu: true },
+  // 九種九牌を宣言した席 (途中流局の表示用)
+  kyuushuSeat: null,
 };
 
 // ─── 副露ヘルパー ─────────────────────────
@@ -527,6 +529,55 @@ function isSanshokuDoukou(decomps) {
 
 // 幺九牌 (1・9・字牌) — チャンタ系判定用
 const YAOCHU_IDS = new Set([0, 1, 2, 10, 11, 19, 20, 21, 22, 23, 24, 25, 26]);
+
+// ─── 九種九牌 (途中流局) ──────────────────────
+// 第一ツモ番で 幺九牌が9種類以上あれば 「この配牌では勝負にならない」 として局を流せる。
+// 初心者が最初に覚える途中流局で、 遭遇頻度も比較的高い。
+// 三麻では 四風連打/四家立直/四槓散了 は成立しないか極小確率なので、 途中流局はこれだけ実装する。
+function countYaochuKinds(tiles) {
+  const kinds = new Set();
+  for (const t of tiles) if (YAOCHU_IDS.has(t.id)) kinds.add(t.id);
+  return kinds.size;
+}
+// 宣言できる条件: 自分の第一ツモ番 (まだ1枚も捨てておらず 北も抜いていない) かつ
+//   誰も鳴いていない (鳴きが入ると第一巡が途切れる) かつ ツモ後の手牌である
+function canKyuushu(seat) {
+  if (G.roundOver || !G.rules.kyuushu) return false;
+  if (!seat || seat === G.emptySeat) return false;
+  if (!hasDrawn(seat)) return false;
+  if (G.rivers[seat].length > 0 || G.kitas[seat] > 0) return false;
+  if (ALL_SEATS.some(s => (G.melds[s] || []).length > 0)) return false;
+  return countYaochuKinds(G.hands[seat]) >= 9;
+}
+function doKyuushu(seat) {
+  if (!canKyuushu(seat)) return false;
+  G.kyuushuSeat = seat;
+  G.busy = false;
+  endRound('九種九牌');
+  return true;
+}
+// 自家に確認を出す。 初心者は九種九牌の存在を知らないので、 条件を満たしたら こちらから提示する。
+// net ゲストは自分で局を終わらせず、 ホストへ宣言を送る (ホスト権威)。
+function offerKyuushuBottom() {
+  if (!canKyuushu('bottom') || G._kyuushuOffered) return false;
+  G._kyuushuOffered = true;
+  const kinds = countYaochuKinds(G.hands.bottom);
+  G.busy = true;
+  renderAll();
+  appConfirm(
+    `<b>九種九牌です</b><br>配牌に 1・9・字牌 が <b>${kinds}種類</b> あります。<br>`
+    + 'この形は あがりに向かいにくいので、 この局を流せます。<br>'
+    + '<span style="font-size:11px; color:#aac;">流しても点棒は動きません (親は続きます)</span>',
+    () => {
+      const n = NETQ();
+      if (n && n.isGuest()) n.guestAction('kyuushu');
+      else doKyuushu('bottom');
+    },
+    'この局を流す', 'このまま打つ',
+    () => { G.busy = false; renderAll(); }
+  );
+  return true;
+}
 // チャンタ/ジュンチャン: 全面子+雀頭に幺九牌が絡む ('junchan'=字牌なし3翻 / 'chanta'=2翻 / null)
 function chantaType(decomps) {
   const meldYaochu = (m) => m.type === 'kotsu'
@@ -742,7 +793,7 @@ const YAKU_DISPLAY_ORDER = [
   'ダブルリーチ', '立直', '一発', '門前清自摸和', '嶺上開花', '搶槓', '海底摸月', '河底撈魚',
   'ピンフ', 'タンヤオ', '一盃口',
   '白', '發', '中', '場風 東', '場風 南', '自風 東', '自風 南', '自風 西',
-  '七対子', '対々和', '三暗刻', '三色同刻', '一気通貫', '二盃口', 'チャンタ', 'ジュンチャン', '混老頭', '小三元', '混一色', '清一色',
+  '七対子', '対々和', '三暗刻', '三槓子', '三色同刻', '一気通貫', '二盃口', 'チャンタ', 'ジュンチャン', '混老頭', '小三元', '混一色', '清一色',
   'ドラ', '赤ドラ', 'カンドラ', '裏ドラ', 'カン裏', '北抜き',
 ];
 function yakuOrderIdx(name) {
@@ -821,6 +872,13 @@ function calcYaku(hand, context) {
     if (ch === 'junchan') { const v = hasOpen ? 2 : 3; yakuList.push({ name: 'ジュンチャン', han: v }); han += v; }
     else if (ch === 'chanta') { const v = hasOpen ? 1 : 2; yakuList.push({ name: 'チャンタ', han: v }); han += v; }
   }
+  // 三槓子 (カン3つ、 2翻。 鳴いても下がらない)
+  // context.extraTiles には カン (暗槓/明槓/加槓) の4枚目だけが入る = その枚数がカンの数。
+  // ポンは3枚なので含まれず、 北抜きは melds ではないので混ざらない (meldExtraTiles 参照)。
+  // ※ 王牌の都合で 1局のカンは最大3回なので 四槓子は発生しない
+  const kanCount = (context.extraTiles || []).length;
+  if (kanCount >= 3) { yakuList.push({ name: '三槓子', han: 2 }); han += 2; }
+
   // 小三元 (三元牌2種刻子 + 1種雀頭、 役牌2翻とは別に +2翻)
   const cAll = countTiles(hand);
   const sangenKo = SAN_GEN_IDS.filter(id => (cAll[id] || 0) >= 3).length;
@@ -1621,7 +1679,9 @@ function scheduleAutoPlays() {
 
 // ─── 共通確認モーダル (破壊的操作の最終確認 — 退出/見逃し等。 Esc=キャンセル/Tabトラップ/44px) ───
 let _confirmOnOk = null;
-function appConfirm(message, onOk, okLabel = 'はい', cancelLabel = 'やめる') {
+let _confirmOnCancel = null;
+// onCancel: 「やめる」/Esc で閉じた時に呼ばれる (選ばなかった側の後始末が要る場面用)
+function appConfirm(message, onOk, okLabel = 'はい', cancelLabel = 'やめる', onCancel = null) {
   let ov = document.getElementById('confirm-overlay');
   if (!ov) {
     ov = document.createElement('div');
@@ -1640,6 +1700,7 @@ function appConfirm(message, onOk, okLabel = 'はい', cancelLabel = 'やめる'
     document.getElementById('confirm-cancel').addEventListener('click', appConfirmClose);
     document.getElementById('confirm-ok').addEventListener('click', () => {
       const fn = _confirmOnOk;
+      _confirmOnCancel = null;   // OK 経路では キャンセル側を発火させない
       appConfirmClose();
       if (fn) fn();
     });
@@ -1664,13 +1725,17 @@ function appConfirm(message, onOk, okLabel = 'はい', cancelLabel = 'やめる'
   document.getElementById('confirm-ok').textContent = okLabel;
   document.getElementById('confirm-cancel').textContent = cancelLabel;
   _confirmOnOk = onOk;
+  _confirmOnCancel = onCancel;
   ov.hidden = false;
   document.getElementById('confirm-cancel').focus();  // 既定フォーカスは安全側 (キャンセル)
 }
 function appConfirmClose() {
   const ov = document.getElementById('confirm-overlay');
   if (ov) ov.hidden = true;
+  const cf = _confirmOnCancel;
   _confirmOnOk = null;
+  _confirmOnCancel = null;
+  if (cf) cf();
 }
 
 // ロビーへ戻る確認 (対局状況に応じてメッセージ切替、 半荘終了後は確認なしで直行)
@@ -2722,6 +2787,8 @@ function startTurn() {
   if (G.turn === 'bottom') {
     drawTile('bottom');
     renderAll();
+    // 九種九牌 (第一ツモ番のみ)。 リーチ中は河が空でないので ここと競合しない
+    if (offerKyuushuBottom()) return;
     // リーチ後 自家: 北なら自動北抜き → ツモあがり可能なら ツモボタン待ち → それ以外は 自動ツモ切り
     // ※ リーチ宣言直後 (= まだ宣言牌を捨てていない) は スキップ (ユーザーが自分で1枚選んで捨てる)
     if (G.isRiichi.bottom && hasDrawn('bottom') && G.justRiichiDeclared !== 'bottom') {
@@ -2797,6 +2864,13 @@ function cpuPlay(seat) {
   const wasRiichiBefore = G.isRiichi[seat];  // 前ターン から リーチ済か (= 既リーチ)
   drawTile(seat);
   renderHand(seat);
+  // 九種九牌 (第一ツモ番のみ): 実戦でも基本は流すので 高めの確率で宣言する。
+  // プレイヤーに 「そういう選択がある」 と見せる意味もある
+  if (canKyuushu(seat) && Math.random() < 0.7) {
+    toast(`${seatLabel(seat)} 九種九牌`);
+    doKyuushu(seat);
+    return;
+  }
   // 既リーチ (前ターンから) = ツモ牌固定で 捨て (待ち変更不可)。 ツモ牌が北なら 先に北抜き、
   // ツモ牌で4枚目が揃い 待ちが変わらない暗槓は 80% で実行 (リーチ中の暗槓)
   if (wasRiichiBefore) {
@@ -2983,6 +3057,25 @@ function endRound(reason) {
     // 親流れ判定: 親がテンパイなら 連荘、 ノーテンなら 流れる (流局は 常に本場+1)
     G.honba++;
     G.lastResult = tenpaiSeats.includes(G.oya) ? 'tenpaiOya' : 'notenOya';
+  } else if (reason === '九種九牌') {
+    // 途中流局: 点棒の移動なし、 親は続行、 本場+1
+    const s = G.kyuushuSeat;
+    const kinds = countYaochuKinds(G.hands[s] || []);
+    document.getElementById('end-title').textContent = '🀄 九種九牌で流局';
+    let txt = `<b>${seatShareLabel(s)}</b> が <b>九種九牌</b> を宣言しました。<br>`;
+    txt += `配牌に 1・9・字牌 が <b>${kinds}種類</b> あったため この局は流れます。<br>`;
+    txt += '点棒の移動はありません。 親は そのまま続きます。';
+    if (G.hands[s]) {
+      txt += '<div style="text-align:left; margin-top:8px;">';
+      txt += '<div style="font-size:11px; color:#ffeb3b; margin-bottom:2px;">宣言した手牌</div>';
+      txt += '<div style="background:rgba(0,0,0,0.35); padding:4px 3px; border-radius:6px; line-height:1;">';
+      txt += sortHand(G.hands[s]).map(t => tileSpanHtml(t, 'width:20px; height:27px;')).join('');
+      txt += '</div></div>';
+    }
+    if (G.kyotaku > 0) txt += `<br>供託 ${G.kyotaku}点 は 次のあがり者へ持ち越し`;
+    document.getElementById('end-text').innerHTML = txt;
+    G.honba++;
+    G.lastResult = 'kyuushu';
   } else {
     document.getElementById('end-text').textContent = `${G.round}局 終了。`;
   }
@@ -3387,7 +3480,8 @@ function nextRound() {
   }
   // 親連荘判定: 親あがり or 流局時親テンパイ → 局を進めず 連荘 (本場は 終了処理側で更新済)
   // 親流れ → 局進行 + 親を反時計回り次家に
-  const continuingDealer = (G.lastResult === 'oyaWin' || G.lastResult === 'tenpaiOya');
+  const continuingDealer = (G.lastResult === 'oyaWin' || G.lastResult === 'tenpaiOya'
+    || G.lastResult === 'kyuushu');  // 九種九牌 (途中流局) も 親は続行
   if (!continuingDealer) {
     const idx = ROUND_ORDER.indexOf(G.round);
     if (idx < 0 || idx >= ROUND_ORDER.length - 1) {
@@ -3485,6 +3579,8 @@ function startNewRound() {
   G.ronQueue = null;
   G.kuikaeBan = null;
   G.lastDiscard = null;
+  G.kyuushuSeat = null;
+  G._kyuushuOffered = false;  // 局ごとに 九種九牌の確認を1回だけ出す
   const nextBtn = document.getElementById('end-next');
   if (nextBtn) nextBtn.style.display = '';
   const peekReturn = document.getElementById('peek-return');
@@ -3881,7 +3977,13 @@ if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator
 function initGame() {
   const params = new URLSearchParams(location.search);
   // ルールオプション (既定 on。 net はホストのURL設定が pub で全員に配布される)
-  G.rules = { naki: params.get('naki') !== '0', tobi: params.get('tobi') !== '0' };
+  // ⚠️ ここは丸ごと再代入なので、 ルールを増やしたら必ずこの行にも足すこと
+  //   (G リテラル側だけに足すと URL 経由の初期化で消える)
+  G.rules = {
+    naki: params.get('naki') !== '0',
+    tobi: params.get('tobi') !== '0',
+    kyuushu: params.get('kyuushu') !== '0',
+  };
   // net対戦 (?net=host / ?net=join&room=1234): netgame.js に委譲
   const netMode = params.get('net');
   if (netMode && NETQ()) {

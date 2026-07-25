@@ -6,10 +6,10 @@
 'use strict';
 
 const NetGame = (() => {
-  const REMOTE_TURN_MS = 45000;  // リモート番の打牌待ち (超過で CPU 代打ち)
+  // リモート番の打牌待ち。 オファー同様「考える時間を秒数で奪わない」方針で長めに取る。
+  // ただし打牌が来ないと全員が進めないので、 離席対策として上限は残す (切断は presence で即検知)。
+  const REMOTE_TURN_MS = 180000;
   const OFFLINE_TURN_MS = 1500;  // 切断中リモートの打牌待ち (presence で切断が判っているので待たない)
-  const CALL_OFFER_MS = 5000;    // ポン/明槓オファー待ち (超過で自動スルー)
-  const OFFER_MS = 10000;        // ロンオファー待ち (超過で自動パス)
   const HEARTBEAT_MS = 15000;    // ホストの生存通知 (onDisconnect が効かないケースの保険)
   // ゲスト: この時間 生存通知が途切れたら切断とみなす。
   // ⚠️ 短くしすぎない。ホスト端末がバックグラウンドに回ると ブラウザが setInterval を
@@ -258,6 +258,8 @@ const NetGame = (() => {
         S.offline[uid] = true;
         toast(`${seatDispName(st)} 切断 — CPU が代打ちします`);
         if (!G.roundOver && G.turn === st) armTurnTimeout(st);  // 待ち時間を即 短縮側へ張り替え
+        // オファー待ちのまま落ちた場合: 制限時間を撤廃したので ここで解決しないと局が永久に止まる
+        if (S.pendingOffer && S.pendingOffer.seat === st) armOfferAbandon(st, S.pendingOffer.kind || 'ron');
       } else if (!off && S.offline[uid]) {
         S.offline[uid] = false;
         toast(`${seatDispName(st)} 復帰`);
@@ -445,6 +447,7 @@ const NetGame = (() => {
       if (act.type === 'discard') return hostApplyDiscard(seat, act.key);
       if (act.type === 'riichi') return hostApplyRiichi(seat);
       if (act.type === 'kita') return hostApplyKita(seat);
+      if (act.type === 'kyuushu') return hostApplyKyuushu(seat);
       if (act.type === 'ankan') return hostApplyAnkan(seat, act.id);
       if (act.type === 'kakan') return hostApplyKakan(seat, act.id);
       if (act.type === 'pon') return hostApplyPon(seat);
@@ -563,6 +566,14 @@ const NetGame = (() => {
     // 通常ロン: キューに受諾 (ダブロンの可能性があるため直接あがらない)
     ronQueueDecide(seat, true);
   }
+  // 九種九牌 (途中流局) の宣言。 権利判定は canKyuushu が持つのでホスト側で必ず再検証する
+  function hostApplyKyuushu(seat) {
+    if (G.roundOver || G.turn !== seat) return;
+    if (typeof canKyuushu !== 'function' || !canKyuushu(seat)) return;
+    clearTimeout(S.turnTimer);
+    toast(`${seatDispName(seat)} 九種九牌`);
+    doKyuushu(seat);
+  }
   function hostApplyPass(seat) {
     if (!S.pendingOffer || S.pendingOffer.seat !== seat) return;
     clearTimeout(S.offerTimer);
@@ -593,32 +604,32 @@ const NetGame = (() => {
     setTimeout(() => { nextTurn(); startTurn(); }, 120);
   }
 
-  // ─── ホスト: リモート席へのロンオファー (discardTile / doKakan(搶槓) から) ──
+  // ─── ホスト: リモート席へのオファー (ロン / ポン・明槓) ──
+  // ⚠️ 制限時間は設けない (野沢さん指示 2026-07-25)。
+  //   あがれるかどうか・鳴くかどうかは初心者ほど考える時間が要る場面で、
+  //   秒数で勝手に見逃し/スルーにされるのは体験として明確に悪い。
+  //   応答が返らないのは 相手が落ちた時だけなので、 それは presence (online=false) で拾って
+  //   即座に解決する。 生きている人は いつまでも待つ。
+  function armOfferAbandon(seat, kind) {
+    const uid = S.remoteSeats[seat];
+    if (!uid || !S.offline[uid]) return;   // 接続中なら 待ち続ける
+    S.pendingOffer = null;
+    toast(`${seatDispName(seat)} 切断中 — ${kind === 'call' ? 'スルー' : '見逃し'}`);
+    resumeAfterOffer();
+  }
   function offerRon(seat, fromSeat, tile, chankan = false) {
     S.pendingOffer = { kind: 'ron', seat, fromSeat, tile, chankan };
     G.busy = true;
     renderAll();
     clearTimeout(S.offerTimer);
-    S.offerTimer = setTimeout(() => {
-      if (!S.pendingOffer) return;
-      S.pendingOffer = null;
-      toast(`${seatDispName(seat)} 見逃し (時間切れ)`);
-      resumeAfterOffer();
-    }, OFFER_MS);
+    armOfferAbandon(seat, 'ron');
   }
-
-  // ─── ホスト: リモート席へのポン/明槓オファー (checkCallsAfterDiscard から) ──
   function offerCall(seat, fromSeat, tile, canKan) {
     S.pendingOffer = { kind: 'call', seat, fromSeat, tile, canKan };
     G.busy = true;
     renderAll();
     clearTimeout(S.offerTimer);
-    S.offerTimer = setTimeout(() => {
-      if (!S.pendingOffer || S.pendingOffer.kind !== 'call') return;
-      S.pendingOffer = null;
-      toast(`${seatDispName(seat)} スルー (時間切れ)`);
-      resumeAfterOffer();
-    }, CALL_OFFER_MS);
+    armOfferAbandon(seat, 'call');
   }
   function hostApplyPon(seat) {
     if (!S.pendingOffer || S.pendingOffer.kind !== 'call' || S.pendingOffer.seat !== seat || G.roundOver) return;
@@ -763,6 +774,9 @@ const NetGame = (() => {
       G._guestCeremonyAnimDone = false;
       G._guestCeremonyCloseWanted = false;
       G._doraRevealPending = true;   // 儀式のめくり演出までドラ表示牌を伏せる (先見え防止)
+      // ゲストは startNewRound を実行しないので 局ごとのリセットを ここで行う
+      G._kyuushuOffered = false;
+      G.kyuushuSeat = null;
       kifuStartRound();              // ゲストの牌譜: 新しい局の記録開始
       setTimeout(() => showDiceCeremony({ guest: true, d1: pub.dice[0], d2: pub.dice[1] }), 200);
     } else if (pub.phase !== 'dice') {
@@ -801,6 +815,8 @@ const NetGame = (() => {
     G.busy = false;
     G.selected = null;
     renderAll();
+    // 九種九牌: 自分の第一ツモ番なら 確認を出す (宣言はホストへ送り、 ホストが局を終わらせる)
+    if (G.turn === 'bottom' && typeof offerKyuushuBottom === 'function') offerKyuushuBottom();
   }
   // 山の静的データ (局中不変)。 pub とは別パスで届くので 受信のたびに自分視点へ回転して反映
   function applyWall() {

@@ -125,8 +125,14 @@ function makeDom() {
   const els = {};
   return {
     getElementById(id) { return (els[id] = els[id] || mk(id)); },
+    querySelector() { return null; },
+    querySelectorAll() { return []; },
     createElement(tag) { return mk('_' + tag); },
-    body: { appendChild() {} },
+    // DOMContentLoaded は発火させない (script.js の initGame を走らせないため)
+    addEventListener() {}, removeEventListener() {},
+    readyState: 'complete',
+    body: { appendChild() {}, classList: { add() {}, remove() {}, toggle() {} }, style: {} },
+    documentElement: { style: {} },
     _els: els,
   };
 }
@@ -157,6 +163,24 @@ function makeInstance(store, uid, opts = {}) {
     cpuDiscard: noop('cpuDiscard'),
     kitaNuki: noop('kitaNuki'),
     canRinshanDraw: () => false,
+    // ターン進行 (オファー解決後に resumeAfterOffer から呼ばれる)
+    nextTurn: noop('nextTurn'),
+    startTurn: noop('startTurn'),
+    completePendingKakan: noop('completePendingKakan'),
+    checkCallsAfterDiscard: () => false,
+    ronQueueDecide: noop('ronQueueDecide'),
+    doPon: () => true,
+    doMinkan: () => true,
+    doAnkan: () => true,
+    doKakan: () => true,
+    kanUraNow: () => [],
+    calcYaku: () => ({ yakuList: [], han: 0, isYakuman: false, error: 'stub' }),
+    seatWindOf: () => '東',
+    meldTriples: () => [],
+    meldExtraTiles: () => [],
+    openMeldIds: () => [],
+    canKyuushu: () => false,
+    doKyuushu: noop('doKyuushu'),
     showDiceCeremony: noop('showDiceCeremony'),
     closeGuestCeremony: noop('closeGuestCeremony'),
     announce: noop('announce'),
@@ -185,6 +209,43 @@ function makeInstance(store, uid, opts = {}) {
   return { NetGame: out.NetGame, G: out.G, S: out.S, dom, logs, uid, ctx };
 }
 
+// ─── ゲームエンジン (script.js) を読み込む ──────────
+// script.js のトップレベル実行は全て `if (typeof document !== 'undefined')` 等のガード付きで、
+// 実処理は DOMContentLoaded 経由。イベントを発火させないので 関数定義だけが手に入る。
+function makeGame() {
+  const dom = makeDom();
+  dom.readyState = 'complete';
+  const ctx = {
+    console, JSON, Math, Date, Object, Array, String, Number, Boolean,
+    Set, Map, Promise, Error, URLSearchParams, isNaN, parseInt, parseFloat,
+    setTimeout, clearTimeout, setInterval, clearInterval,
+    document: dom,
+    location: { search: '', href: '' },
+    localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
+    matchMedia: () => ({ matches: false, addEventListener() {} }),
+  };
+  ctx.window = ctx;
+  ctx.globalThis = ctx;
+  vm.createContext(ctx);
+  const code = readSrc('script.js') + `
+;({ G, calcYaku, isWinning, countTiles, sortHand, shantenOf, isTenpai13,
+    TILE_NAMES, YAOCHU_IDS, RED_DORA_IDS, KITA_ID, ALL_SEATS,
+    meldExtraTiles, openMeldIds, meldTriples, equivHand, seatWindOf,
+    countYaochuKinds: (typeof countYaochuKinds === 'function' ? countYaochuKinds : null),
+    canKyuushu: (typeof canKyuushu === 'function' ? canKyuushu : null) })`;
+  const api = vm.runInContext(code, ctx, { filename: 'script.js' });
+  return { ...api, ctx, dom };
+}
+
+// 牌の生成ヘルパー: 'あ1p' のような表記ではなく id 直指定。
+//   萬子 0=1m 1=9m / 筒子 2..10 = 1p..9p / 索子 11..19 = 1s..9s
+//   字牌 20=東 21=南 22=西 23=北 24=白 25=發 26=中
+const T = (id, copy = 0, isRed = false) => ({ id, copy, isRed });
+// 同一牌を n 枚 (copy 番号は自動で振る)
+const Tn = (id, n) => Array.from({ length: n }, (_, i) => T(id, i));
+// 連続する数牌 (順子): 起点 id から3枚
+const Tseq = (id, copy = 0) => [T(id, copy), T(id + 1, copy), T(id + 2, copy)];
+
 // ─── アサーション ─────────────────────────
 const results = [];
 function check(name, cond, detail) {
@@ -206,4 +267,4 @@ function summary(title) {
 }
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-module.exports = { SharedStore, makeInstance, check, summary, sleep, results, pathGet };
+module.exports = { SharedStore, makeInstance, makeGame, check, summary, sleep, results, pathGet, T, Tn, Tseq };
