@@ -234,6 +234,12 @@ function makeGame() {
     countYaochuKinds: (typeof countYaochuKinds === 'function' ? countYaochuKinds : null),
     canKyuushu: (typeof canKyuushu === 'function' ? canKyuushu : null),
     isNagashiMangan: (typeof isNagashiMangan === 'function' ? isNagashiMangan : null),
+    coachAnalyzeCore: (typeof coachAnalyzeCore === 'function' ? coachAnalyzeCore : null),
+    coachRemainingOf: (typeof coachRemainingOf === 'function' ? coachRemainingOf : null),
+    coachDangerOf: (typeof coachDangerOf === 'function' ? coachDangerOf : null),
+    coachShapeOf: (typeof coachShapeOf === 'function' ? coachShapeOf : null),
+    waitingIds: (typeof waitingIds === 'function' ? waitingIds : null),
+    nextTileId: (typeof nextTileId === 'function' ? nextTileId : null),
     SCORE_TABLE: (typeof SCORE_TABLE !== 'undefined' ? SCORE_TABLE : null) })`;
   const api = vm.runInContext(code, ctx, { filename: 'script.js' });
   return { ...api, ctx, dom };

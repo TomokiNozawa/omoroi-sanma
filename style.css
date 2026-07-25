@@ -485,6 +485,8 @@ body {
 .coach-grade--ok { color: #ffb74d; }
 .coach-grade--bad { color: #ff8a80; }
 .coach-safety { display: block; font-size: 11px; color: #cde; margin-top: 2px; }
+/* 打点・役の補足 (損している時だけ出す) */
+.coach-note { display: block; font-size: 11px; color: #ffd54f; margin-top: 2px; }
 
 /* ── 牌譜ふりかえり (📖 ビューア — end-modal 派生でデザイン統一) ── */
 .kifu-modal { max-width: 420px; text-align: left; }
