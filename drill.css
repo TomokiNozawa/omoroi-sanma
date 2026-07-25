@@ -86,12 +86,26 @@
 .drill-q-body {
   background: rgba(0, 0, 0, 0.28); border-radius: 14px; padding: 14px; margin-bottom: 14px;
 }
+/* 手牌は必ず1行。 枚数 (14〜17枚) に応じて牌が自動で縮む。
+   折り返すと「どこまでが1つの手か」が読めなくなるため wrap は使わない */
 .drill-hand {
-  display: flex; flex-wrap: wrap; gap: 2px; justify-content: center; margin-bottom: 10px;
+  display: flex; flex-wrap: nowrap; gap: 4px;
+  justify-content: center; align-items: flex-end;
+  /* 親の padding の外まで使って牌を少しでも大きく見せる (14〜15枚を1行に収める都合で
+     牌が小さくなりがちなため)。 はみ出さないよう width で相殺する */
+  margin: 0 -10px 10px; width: calc(100% + 20px);
 }
 .drill-hand:empty { display: none; }
-.drill-hand img { width: 30px; height: 40px; border-radius: 3px; }
-.drill-hand .drill-hand__sep { width: 10px; }
+/* 面子のまとまり。 隙間で区切ると どの面子に何符ついたかを追いやすい */
+.drill-hand__grp { display: flex; gap: 1px; flex: 0 1 auto; min-width: 0; }
+/* width が基準サイズ、 flex-shrink で画面に収まるまで縮む。
+   ※ flex-basis を 0 にすると幅が潰れて牌が消えるので width 指定のままにすること */
+.drill-hand__grp img {
+  flex: 0 1 auto;
+  width: 30px; min-width: 0; height: auto;
+  aspect-ratio: 3 / 4;     /* 牌画像 (69×92) の比率。 縮んでも潰れない */
+  border-radius: 3px;
+}
 .drill-hand .drill-hand__win { outline: 2px solid #ff9800; outline-offset: 1px; border-radius: 3px; }
 .drill-cond { font-size: 14px; line-height: 1.7; margin: 0 0 8px; text-align: center; }
 .drill-cond b { color: #ffeb3b; }
@@ -154,6 +168,7 @@
 
 @media (min-width: 640px) {
   .drill-title { font-size: 18px; }
-  .drill-hand img { width: 36px; height: 48px; }
+  .drill-hand { gap: 8px; }
+  .drill-hand__grp img { width: 38px; }
   .drill-answers { grid-template-columns: repeat(4, 1fr); }
 }
