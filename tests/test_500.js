@@ -109,10 +109,13 @@ function fu2(h) {
   if (h.isChiitoi) return 25;                        // 七対子は一律25符
   if (h.isPinfu && h.isTsumo) return 20;             // 平和ツモは一律20符
   let f = 20;                                        // ① 基本符 (副底)
-  for (const m of h.melds) {                         // ③ 各メンツ
+  for (let i = 0; i < h.melds.length; i++) {         // ③ 各メンツ
+    const m = h.melds[i];
     if (m.type === 'shuntsu') continue;
     const col = YAOCHU2.has(m.id) ? 1 : 0;
-    if (m.type === 'koutsu') f += FU_MELD[m.open ? 'minko' : 'anko'][col];
+    // ロンあがりで完成した刻子は明刻扱い (シャンポン待ちで効く)
+    const byRon = (!h.isTsumo && h.ronMeldIdx === i);
+    if (m.type === 'koutsu') f += FU_MELD[(m.open || byRon) ? 'minko' : 'anko'][col];
     else f += FU_MELD[m.open ? 'minkan' : 'ankan'][col];
   }
   const p = h.pair;                                  // ④ アタマ (役牌なら+2符)

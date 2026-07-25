@@ -87,7 +87,9 @@ function genTehai(players) {
       let st;
       do { st = pick(SHUNTSU_STARTS); } while (used.has(st));
       used.add(st); used.add(st + 1); used.add(st + 2);
-      melds.push({ type: 'shuntsu', id: st, open: !isMenzen && Math.random() < 0.5 });
+      // ⚠️ 三麻にチーは無いので 順子を鳴いた形にはしない (四麻のみ)
+      const canChi = (players === 4);
+      melds.push({ type: 'shuntsu', id: st, open: canChi && !isMenzen && Math.random() < 0.5 });
     }
   }
   // 門前なら全ての面子は暗 (暗槓は門前を崩さない)
@@ -105,8 +107,15 @@ function genTehai(players) {
   waitPool.push('tanki');
   const wait = pick(waitPool);
 
+  // シャンポン待ちのロンは「あがり牌で完成した刻子」が明刻になるので、どの刻子かを決めておく。
+  // 単騎(雀頭)・両面/嵌張/辺張(順子)は符に影響しないので指定しない
+  let ronMeldIdx = -1;
+  if (wait === 'shanpon' && !isTsumo) {
+    const cand = melds.map((m, i) => (m.type === 'koutsu' && !m.open) ? i : -1).filter(i => i >= 0);
+    if (cand.length) ronMeldIdx = pick(cand);
+  }
   const hand = { melds, pair: pairId, wait, isTsumo, isMenzen, seatWind, roundWind,
-    isChiitoi: false, isPinfu: false };
+    isChiitoi: false, isPinfu: false, ronMeldIdx };
   // ピンフ判定 (全部順子 + 両面 + 役牌でない雀頭 + 門前)
   const pairIsYakuhai = ScoreCalc.SANGEN.includes(pairId)
     || ScoreCalc.WINDS[seatWind] === pairId || ScoreCalc.WINDS[roundWind] === pairId;
@@ -130,18 +139,41 @@ function genTehai(players) {
 
 // 手牌の牌並び (表示用)
 function handTiles(hand) {
-  return handGroups(hand).flat();
+  return handGroups(hand).flatMap(g => g.ids);
 }
-// 面子ごとに区切った並び。 区切りが見えると どの面子で何符ついたかを追いやすい
+// 面子ごとに区切った並び。
+// 鳴いたか (open) / ロンで完成したか (ron) を持たせて 見た目で区別できるようにする。
+// 明刻2符と暗刻4符は倍違うので、鳴きが判らないと符が計算できない
 function handGroups(hand) {
   const groups = [];
-  for (const m of hand.melds) {
-    if (m.type === 'shuntsu') groups.push([m.id, m.id + 1, m.id + 2]);
-    else if (m.type === 'koutsu') groups.push([m.id, m.id, m.id]);
-    else groups.push([m.id, m.id, m.id, m.id]);
+  for (let i = 0; i < hand.melds.length; i++) {
+    const m = hand.melds[i];
+    let ids;
+    if (m.type === 'shuntsu') ids = [m.id, m.id + 1, m.id + 2];
+    else if (m.type === 'koutsu') ids = [m.id, m.id, m.id];
+    else ids = [m.id, m.id, m.id, m.id];
+    // 暗槓(32符)と明槓(16符)、ポン(明刻)は符が大きく変わるので 種別まで書く
+    let label = '';
+    if (m.type === 'kantsu') label = m.open ? '明槓' : '暗槓';
+    else if (m.open) label = (m.type === 'koutsu') ? 'ポン' : 'チー';
+    groups.push({ ids, open: !!m.open, ron: hand.ronMeldIdx === i, type: m.type, label });
   }
-  groups.push([hand.pair, hand.pair]);   // 雀頭は最後
+  groups.push({ ids: [hand.pair, hand.pair], pair: true, label: '雀頭' });   // 雀頭は最後
   return groups;
+}
+// あがり牌の位置 {g: グループ番号, t: グループ内の位置}。 待ちの形から1枚を特定する
+function winTilePos(hand) {
+  if (hand.wait === 'shanpon') {
+    const i = hand.ronMeldIdx >= 0 ? hand.ronMeldIdx
+      : hand.melds.findIndex(m => m.type === 'koutsu');
+    return i >= 0 ? { g: i, t: 2 } : null;
+  }
+  if (hand.wait === 'tanki') return { g: hand.melds.length, t: 1 };  // 雀頭の2枚目
+  const si = hand.melds.findIndex(m => m.type === 'shuntsu');
+  if (si < 0) return null;
+  // 嵌張=真ん中 / 辺張=端 / 両面=端
+  const t = hand.wait === 'kanchan' ? 1 : (hand.wait === 'penchan' ? 2 : 0);
+  return { g: si, t };
 }
 
 function tileImgHtml(id, cls = '') {
@@ -244,7 +276,8 @@ function condText(q) {
     const menzen = h.isMenzen ? '門前' : '副露あり';
     const waitName = { ryanmen: '両面待ち', shanpon: 'シャンポン待ち', kanchan: '嵌張待ち',
       penchan: '辺張待ち', tanki: '単騎待ち' }[h.wait];
-    return `${rule} / ${who}・自風${h.seatWind} / ${how} / ${menzen} / ${waitName}<br>`
+    // 場風は雀頭・刻子が役牌かどうかの判定に必要なので必ず出す (無いと符が計算できない)
+    return `${rule} / <b>${h.roundWind}場</b>・自風<b>${h.seatWind}</b> / ${who} / ${how} / ${menzen} / ${waitName}<br>`
       + `役は合わせて <b>${c.han}翻</b> でした`;
   }
   return `${rule} / ${who} の ${how}<br><b>${c.fu}符 ${c.han}翻</b>`;
@@ -261,13 +294,30 @@ function renderQuestion() {
 
   // 手牌
   const handEl = $('drill-hand');
+  const legendEl = $('drill-legend');
   if (q.kind === 'tehai') {
+    const wp = winTilePos(q.hand);
+    const groups = handGroups(q.hand);
     // 面子ごとに包む (CSS 側で1行に収める。 枚数が増えると牌が自動で縮む)
-    handEl.innerHTML = handGroups(q.hand)
-      .map(g => `<span class="drill-hand__grp">${g.map(id => tileImgHtml(id)).join('')}</span>`)
-      .join('');
+    handEl.innerHTML = groups.map((g, gi) => {
+      const cls = 'drill-hand__grp'
+        + (g.open ? ' drill-hand__grp--open' : '')
+        + (g.pair ? ' drill-hand__grp--pair' : '');
+      const tiles = g.ids.map((id, ti) =>
+        tileImgHtml(id, (wp && wp.g === gi && wp.t === ti) ? 'drill-hand__win' : '')).join('');
+      return `<span class="${cls}" data-label="${g.label || ''}">${tiles}</span>`;
+    }).join('');
+    // 凡例 (何を見て符を数えるかが判るように)
+    const parts = ['<span class="drill-lg drill-lg--win">□</span> あがり牌'];
+    if (groups.some(g => g.open)) parts.push('<span class="drill-lg drill-lg--open">□</span> 鳴いた面子 (明刻/明槓)');
+    if (q.hand.wait === 'shanpon' && !q.hand.isTsumo) {
+      parts.push('<span class="drill-note-inline">※ロンで完成した刻子は明刻</span>');
+    }
+    legendEl.innerHTML = parts.join('　');
+    legendEl.hidden = false;
   } else {
     handEl.innerHTML = '';
+    if (legendEl) { legendEl.innerHTML = ''; legendEl.hidden = true; }
   }
 
   $('drill-cond').innerHTML = condText(q);

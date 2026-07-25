@@ -45,14 +45,22 @@
     bd.push({ label: '副底 (基本符)', fu: 20 });
 
     // 面子
-    for (const m of (hand.melds || [])) {
+    // ⚠️ ロンあがりでは「あがり牌で完成した刻子」は明刻として数える (実ルール)。
+    //    シャンポン待ちのロンで効いてくる。 hand.ronMeldIdx にその面子の位置を入れる
+    const melds = hand.melds || [];
+    for (let i = 0; i < melds.length; i++) {
+      const m = melds[i];
       if (m.type === 'shuntsu') continue;  // 順子は 0符
       const yao = isYaochu(m.id);
+      const byRon = (!hand.isTsumo && hand.ronMeldIdx === i);
       let v = 0, name = '';
       if (m.type === 'koutsu') {
-        v = m.open ? (yao ? 4 : 2) : (yao ? 8 : 4);
-        name = `${m.open ? '明刻' : '暗刻'} (${yao ? '幺九牌' : '中張牌'})`;
+        const open = m.open || byRon;
+        v = open ? (yao ? 4 : 2) : (yao ? 8 : 4);
+        name = `${open ? '明刻' : '暗刻'} (${yao ? '幺九牌' : '中張牌'})`
+          + (byRon && !m.open ? ' ※ロンで完成' : '');
       } else if (m.type === 'kantsu') {
+        // 槓はロンで完成しない (カンは自分の手番でしかできない)
         v = m.open ? (yao ? 16 : 8) : (yao ? 32 : 16);
         name = `${m.open ? '明槓' : '暗槓'} (${yao ? '幺九牌' : '中張牌'})`;
       }
