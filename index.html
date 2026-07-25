@@ -6,7 +6,7 @@
   <meta name="description" content="おもろい三麻 - 初心者向け 三人麻雀 Webアプリ (関西ルール / 翻数のみ / 全部赤ドラ / 北抜きあり)">
   <meta name="theme-color" content="#0d3b1f">
   <link rel="manifest" href="manifest.json">
-  <link rel="stylesheet" href="style.css?v=0.9.7c">
+  <link rel="stylesheet" href="style.css?v=0.9.7i">
   <title>おもろい三麻 — 初心者向け三人麻雀</title>
 </head>
 <body>
@@ -46,6 +46,12 @@
         <span class="lobby__btn-label">牌譜ふりかえり</span>
         <span class="lobby__btn-desc">あがり局・振込局をAIが1手ずつ採点</span>
       </button>
+
+      <a href="drill.html" class="lobby__btn">
+        <span class="lobby__btn-icon">🧮</span>
+        <span class="lobby__btn-label">点数計算ドリル</span>
+        <span class="lobby__btn-desc">符の数え方から点数まで／三麻・四麻 両対応</span>
+      </a>
     </div>
 
     <!-- ルールオプション (ソロ/ルーム共通、 localStorage 保持) -->
@@ -83,8 +89,8 @@
     </footer>
   </main>
 
-  <script src="firebase-config.js?v=0.9.7c"></script>
-  <script src="script.js?v=0.9.7c"></script>
+  <script src="firebase-config.js?v=0.9.7i"></script>
+  <script src="script.js?v=0.9.7i"></script>
   <script>
     // ルーム作成/参加 ダイアログ (合言葉制)
     (function () {
