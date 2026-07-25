@@ -70,8 +70,9 @@ function genTehai(players) {
   // 面子4つ: 順子と刻子を混ぜる (全部順子だとピンフ形ばかりになる)
   const used = new Set();
   const melds = [];
-  const koutsuCount = pick([0, 1, 1, 2, 2, 3]);
+  // 刻子+槓子は最大3つまで (4つ揃うと四暗刻/四槓子の形になり、符計算の練習にそぐわない)
   const kantsuCount = Math.random() < 0.18 ? 1 : 0;
+  const koutsuCount = Math.min(pick([0, 1, 1, 2, 2, 3]), 3 - kantsuCount);
   for (let i = 0; i < 4; i++) {
     const wantKan = (i < kantsuCount);
     const wantKou = !wantKan && (i < kantsuCount + koutsuCount);
@@ -112,8 +113,18 @@ function genTehai(players) {
   hand.isPinfu = isMenzen && melds.every(m => m.type === 'shuntsu') && wait === 'ryanmen' && !pairIsYakuhai;
 
   let han = pick([1, 1, 2, 2, 2, 3, 3, 4]);
-  // ピンフツモは ピンフ1翻 + 門前清自摸和1翻 で 必ず2翻以上になる
-  if (hand.isPinfu && hand.isTsumo && han < 2) han = 2;
+  // 手の形から確実につく役を見積もって翻数の下限にする。
+  // これが無いと「暗刻3つ (三暗刻) なのに1翻」のような、麻雀として成立しない問題が出る
+  const nonShuntsu = melds.filter(m => m.type !== 'shuntsu');
+  const concealed = nonShuntsu.filter(m => !m.open);
+  const kanCount = melds.filter(m => m.type === 'kantsu').length;
+  let minHan = 1;
+  if (nonShuntsu.length === 4) minHan += 2;                 // 対々和
+  if (concealed.length >= 3) minHan += 2;                   // 三暗刻
+  if (kanCount >= 3) minHan += 2;                           // 三槓子
+  if (hand.isPinfu && isTsumo) minHan = Math.max(minHan, 2);// ピンフ + 門前清自摸和
+  if (hand.isPinfu && !isTsumo) minHan = Math.max(minHan, 1);
+  han = Math.max(han, minHan);
   return { hand, han, isOya, players };
 }
 
