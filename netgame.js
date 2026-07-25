@@ -7,8 +7,12 @@
 
 const NetGame = (() => {
   const REMOTE_TURN_MS = 45000;  // リモート番の打牌待ち (超過で CPU 代打ち)
+  const OFFLINE_TURN_MS = 1500;  // 切断中リモートの打牌待ち (presence で切断が判っているので待たない)
   const CALL_OFFER_MS = 5000;    // ポン/明槓オファー待ち (超過で自動スルー)
   const OFFER_MS = 10000;        // ロンオファー待ち (超過で自動パス)
+  const HEARTBEAT_MS = 15000;    // ホストの生存通知 (onDisconnect が効かないケースの保険)
+  const HOST_TIMEOUT_MS = 45000; // ゲスト: この時間 ホストの生存通知が途切れたら切断とみなす
+  const MAX_PLAYERS = 3;         // 三麻なので 卓は最大3人
 
   const S = {
     mode: null,          // 'host' | 'guest'
@@ -31,6 +35,15 @@ const NetGame = (() => {
     endInfoShown: false,
     lastPubTime: 0,
     busySent: false,
+    seatKnown: false,    // guest: 自分の席が確定したか (未確定なら盤面を見せない = 幽霊観戦の防止)
+    pendingPub: null,    // guest: 席確定前に届いた pub (確定後に適用する)
+    wall: null,          // guest: 山の静的データ {seq, drawPosList, kingCells}
+    lastWall: '',        // host: 山データの差分送信用 (局中不変なので 1局1回で済む)
+    wallSeq: 0,
+    hbTimer: null,       // host: 生存通知の interval
+    hostWatchTimer: null,// guest: ホスト死活監視の interval
+    hostGone: false,     // guest: ホスト切断を検知済み
+    offline: {},         // host: uid -> true (presence で切断が判っている席)
     ceremonySeq: 0,      // host: 儀式ごとに +1 (ゲストの再生トリガー)
     seenCeremony: 0,     // guest: 再生済み儀式 seq
     evSeq: 0,            // host: 演出イベント通番
@@ -128,8 +141,16 @@ const NetGame = (() => {
       if (!meta || (Date.now() - (meta.createdAt || 0)) > 6 * 3600 * 1000) {
         S.room = code;
         await S.net.setVal(`rooms/${code}`, null);  // 古い残骸を掃除
-        await S.net.setVal(`rooms/${code}/meta`, { createdAt: Date.now(), hostUid: S.net.uid, status: 'waiting' });
-        await S.net.setVal(`rooms/${code}/players/${S.net.uid}`, { name: S.name, joinedAt: Date.now() });
+        // ⚠️ meta (hostUid) を hands の掃除より先に書く。
+        //   rules 側で hands の書き込みを 「そのルームのホストのみ」 に絞るため、
+        //   所有者が立つ前に hands を触ると 自分の書き込みが弾かれる。
+        await S.net.setVal(`rooms/${code}/meta`, {
+          createdAt: Date.now(), hostUid: S.net.uid, status: 'waiting',
+          hostOnline: true, hb: Date.now(),
+        });
+        await S.net.setVal(`hands/${code}`, null);  // 秘匿手牌の残骸も掃除 (放置すると単調増加する)
+        await S.net.setVal(`rooms/${code}/players/${S.net.uid}`, { name: S.name, joinedAt: Date.now(), online: true });
+        armHostPresence();
         watchPlayers();
         return;
       }
@@ -137,25 +158,107 @@ const NetGame = (() => {
     showWaiting('<h2 class="end-modal__title">⚠️ ルーム作成失敗</h2><p class="end-modal__text">もう一度お試しください。</p>');
   }
 
+  function joinError(title, text) {
+    showWaiting(`<h2 class="end-modal__title">⚠️ ${title}</h2><p class="end-modal__text">${text}</p>`
+      + '<div class="end-modal__nav"><a href="index.html" class="end-modal__btn">ロビーへ</a></div>');
+  }
+
   async function joinRoom(code) {
     const meta = await S.net.once(`rooms/${code}/meta`);
     if (!meta || meta.status === 'ended') {
-      showWaiting('<h2 class="end-modal__title">⚠️ ルームが見つかりません</h2><p class="end-modal__text">合言葉を確認してください。</p><div class="end-modal__nav"><a href="index.html" class="end-modal__btn">ロビーへ</a></div>');
+      joinError('ルームが見つかりません', '合言葉を確認してください。');
       return;
     }
+    // 自分の席が既にあるか (= リロード/一時切断からの復帰) を先に確認する
+    const myHand = await S.net.once(`hands/${code}/${S.net.uid}`);
+    const rejoining = !!myHand;
+    if (!rejoining) {
+      // 対戦開始後の新規入室は拒否 (席が無いまま盤面だけ見える 「幽霊観戦」 を防ぐ)
+      if (meta.status === 'playing') {
+        joinError('対戦がすでに始まっています', 'この合言葉のルームは進行中です。<br>次の対戦をお待ちください。');
+        return;
+      }
+      // 満室判定 (三麻なので卓は最大3人)
+      const players = (await S.net.once(`rooms/${code}/players`)) || {};
+      const others = Object.keys(players).filter(u => u !== S.net.uid).length;
+      if (others >= MAX_PLAYERS) {
+        joinError('ルームが満席です', `この卓は最大 ${MAX_PLAYERS} 人です。`);
+        return;
+      }
+    }
     S.room = code;
-    await S.net.setVal(`rooms/${code}/players/${S.net.uid}`, { name: S.name, joinedAt: Date.now() });
+    await S.net.setVal(`rooms/${code}/players/${S.net.uid}`, { name: S.name, joinedAt: Date.now(), online: true });
+    armGuestPresence();
     watchPlayers();
-    // 公開状態 + 自分の手牌を購読
+    watchHost();
+    // 公開状態 + 山の静的データ + 自分の手牌を購読
     S.net.onVal(`rooms/${code}/pub`, (json) => { if (json) ingestPub(json); });
+    S.net.onVal(`rooms/${code}/wall`, (json) => { if (json) ingestWall(json); });
     S.net.onVal(`hands/${code}/${S.net.uid}`, (json) => { if (json) ingestHand(json); });
+  }
+
+  // ─── 接続状態 (presence) ───────────────────
+  // onDisconnect: 切断を Firebase サーバ側が即座に反映 (タブを閉じる/通信断/クラッシュ)
+  // ハートビート: onDisconnect が効かないケース (アプリのフリーズ・LocalBus) の保険
+  function armHostPresence() {
+    S.net.onDisconnectSet(`rooms/${S.room}/meta/hostOnline`, false);
+    S.net.onDisconnectSet(`rooms/${S.room}/players/${S.net.uid}/online`, false);
+    clearInterval(S.hbTimer);
+    S.hbTimer = setInterval(() => {
+      if (!S.room) return;
+      S.net.setVal(`rooms/${S.room}/meta/hb`, Date.now());
+    }, HEARTBEAT_MS);
+  }
+  function armGuestPresence() {
+    S.net.onDisconnectSet(`rooms/${S.room}/players/${S.net.uid}/online`, false);
+  }
+  // ゲスト: ホストが落ちたら 無言でフリーズせず 明示的に知らせる
+  function watchHost() {
+    S.net.onVal(`rooms/${S.room}/meta`, (meta) => {
+      if (!meta || S.hostGone) return;
+      if (meta.status === 'ended') { clearInterval(S.hostWatchTimer); return; }
+      if (meta.hostOnline === false) showHostGone();
+    });
+    clearInterval(S.hostWatchTimer);
+    S.hostWatchTimer = setInterval(async () => {
+      if (!S.room || S.hostGone) return;
+      const meta = await S.net.once(`rooms/${S.room}/meta`);
+      if (!meta || meta.status === 'ended') return;
+      if (meta.hb && (Date.now() - meta.hb) > HOST_TIMEOUT_MS) showHostGone();
+    }, HEARTBEAT_MS);
+  }
+  function showHostGone() {
+    if (S.hostGone) return;
+    S.hostGone = true;
+    clearInterval(S.hostWatchTimer);
+    showWaiting('<h2 class="end-modal__title">⚠️ ホストとの接続が切れました</h2>'
+      + '<p class="end-modal__text">ホストが退出したか、通信が途切れたため<br>この対戦は続けられません。</p>'
+      + '<div class="end-modal__nav"><a href="index.html" class="end-modal__btn">ロビーへ</a></div>');
   }
 
   function watchPlayers() {
     S.net.onVal(`rooms/${S.room}/players`, (players) => {
       S.players = players || {};
-      if (!S.started) renderWaitingRoom();
+      if (S.mode === 'host' && S.started) syncOffline();
+      // ホスト切断の告知後に待機画面で上書きしない (切断で players も更新されるため順序で潰れる)
+      if (!S.started && !S.hostGone) renderWaitingRoom();
     });
+  }
+  // ホスト: 着席済みゲストの切断を検知 (切断席は 45秒待たずに CPU 代打ちへ切替)
+  function syncOffline() {
+    for (const st of Object.keys(S.remoteSeats)) {
+      const uid = S.remoteSeats[st];
+      const p = S.players[uid];
+      const off = !p || p.online === false;
+      if (off && !S.offline[uid]) {
+        S.offline[uid] = true;
+        toast(`${seatDispName(st)} 切断 — CPU が代打ちします`);
+        if (!G.roundOver && G.turn === st) armTurnTimeout(st);  // 待ち時間を即 短縮側へ張り替え
+      } else if (!off && S.offline[uid]) {
+        S.offline[uid] = false;
+        toast(`${seatDispName(st)} 復帰`);
+      }
+    }
   }
 
   // ─── ホスト: 開始 ───────────────────────
@@ -182,6 +285,13 @@ const NetGame = (() => {
       S.net.setVal(`hands/${S.room}/${S.remoteSeats[st]}`,
         JSON.stringify({ seat: st, tiles: [], justDrawn: null }));
     }
+    // 席に着けなかった参加者 (定員オーバー) には その旨を通知する。
+    // 通知しないと 待機画面のまま放置され、 本人は理由がわからない
+    const seated = new Set(guestUids);
+    for (const uid of Object.keys(S.players)) {
+      if (uid === S.net.uid || seated.has(uid)) continue;
+      S.net.setVal(`hands/${S.room}/${uid}`, JSON.stringify({ seat: null, full: true }));
+    }
     S.net.onChildAdd(`rooms/${S.room}/acts`, onAction);
     hideWaiting();
     // 既存フローで開始 (点数リセット込み)
@@ -192,9 +302,12 @@ const NetGame = (() => {
   }
 
   // ─── ホスト: 状態公開 ─────────────────────
+  // ※ seq/t (毎回変わる値) は ここに入れない。 入れると publish() の差分判定が常に不成立になり、
+  //   状態が1ビットも変わらない再描画でも full pub を送ってしまう (v0.9.6 までの実挙動)。
+  // ※ drawPosList/kingCells は配牌時に確定して局中不変なので wall パスへ分離 (pub の約8割を占めていた)。
   function buildPub() {
     const pub = {
-      seq: ++S.pubSeq, t: Date.now(), status: 'playing',
+      status: 'playing', wallSeq: S.wallSeq,
       round: G.round, honba: G.honba, kyotaku: G.kyotaku,
       oya: G.oya, turn: G.turn, emptySeat: G.emptySeat, cpuSeats: G.cpuSeats,
       scores: G.scores, kitas: G.kitas, kitaTiles: G.kitaTiles,
@@ -205,7 +318,6 @@ const NetGame = (() => {
       handCounts: Object.fromEntries(ALL_SEATS.map(s => [s, G.hands[s].length])),
       remain: G.drawTiles.length, kingRemain: G.kingTiles.length,
       doraIndicator: G.doraIndicator, doraSeat: G.doraSeat, doraDouIdx: G.doraDouIdx,
-      drawPosList: G.drawPosList, kingCells: G.kingCells,
       kingUsed: G.kingUsedCells, kanDoraCells: G.kanDoraCells,
       startSeat: G.startSeat, cutPosInStart: G.cutPosInStart,
       lastDiscardSeat: lastDiscardSeat(),
@@ -236,12 +348,23 @@ const NetGame = (() => {
     }
     return null;
   }
+  // 山の静的データ (drawPosList/kingCells) は局中不変 = 差分判定により実質 1局1回しか送られない
+  function publishWall() {
+    const body = JSON.stringify({ drawPosList: G.drawPosList || [], kingCells: G.kingCells || [] });
+    if (body === S.lastWall) return;
+    S.lastWall = body;
+    S.wallSeq++;
+    S.net.setVal(`rooms/${S.room}/wall`, JSON.stringify({ seq: S.wallSeq, ...JSON.parse(body) }));
+  }
   function publish() {
     if (!isHost()) return;
-    const json = JSON.stringify(buildPub());
+    publishWall();  // pub より先に送る (ゲストが山を描けるように)
+    const pub = buildPub();
+    const json = JSON.stringify(pub);
     if (json !== S.lastPub) {
       S.lastPub = json;
-      S.net.setVal(`rooms/${S.room}/pub`, json);
+      // 送信時にだけ seq/t を付ける (差分判定は上の json = seq/t 抜きで行う)
+      S.net.setVal(`rooms/${S.room}/pub`, JSON.stringify({ ...pub, seq: ++S.pubSeq, t: Date.now() }));
     }
     // 秘匿手牌
     for (const st of Object.keys(S.remoteSeats)) {
@@ -299,12 +422,14 @@ const NetGame = (() => {
   }
   function armTurnTimeout(seat) {
     clearTimeout(S.turnTimer);
+    const uid = S.remoteSeats[seat];
+    const isOff = !!(uid && S.offline[uid]);
     S.turnTimer = setTimeout(() => {
       if (G.roundOver || G.turn !== seat) return;
-      toast(`${seatDispName(seat)} 時間切れ — 自動打牌`);
+      toast(isOff ? `${seatDispName(seat)} 切断中 — CPU 代打ち` : `${seatDispName(seat)} 時間切れ — 自動打牌`);
       G.busy = true;
       cpuDiscard(seat);  // シャンテンAIで代打ち (ツモ勝ち/リーチ宣言中の制限も内包)
-    }, REMOTE_TURN_MS);
+    }, isOff ? OFFLINE_TURN_MS : REMOTE_TURN_MS);
   }
 
   // ─── ホスト: アクション受信 ─────────────────
@@ -533,6 +658,11 @@ const NetGame = (() => {
     S.endInfo = { kind: 'gameEnd', title, html };
     publish();
     S.net.setVal(`rooms/${S.room}/meta/status`, 'ended');
+    // 後始末: acts と 秘匿手牌は用済み (pub は結果表示に使うので残す)。
+    // 放置すると DB 上に単調に積み上がるため 半荘終了時に必ず掃除する。
+    clearInterval(S.hbTimer);
+    S.net.setVal(`rooms/${S.room}/acts`, null);
+    S.net.setVal(`hands/${S.room}`, null);
   }
   function onNewRound() {
     if (!isHost()) return;
@@ -542,10 +672,14 @@ const NetGame = (() => {
 
   // ─── ゲスト: 受信 ─────────────────────
   function ingestPub(json) {
+    if (S.hostGone) return;  // 切断告知を出したあとは盤面を触らない (告知が消えてしまう)
     let pub;
     try { pub = JSON.parse(json); } catch (e) { return; }
-    if (!S.started) { S.started = true; hideWaiting(); }
     S.lastPubTime = Date.now();
+    // 席が未確定のうちは 盤面を一切表示しない (席の無い第三者に卓が見えてしまうのを防ぐ)。
+    // ホストは hostStart で hands/{uid} に席を先行送信するので、通常は席確定が先に届く。
+    if (!S.seatKnown) { S.pendingPub = json; return; }
+    if (!S.started) { S.started = true; hideWaiting(); }
     const k = S.rot;
     G.round = pub.round; G.honba = pub.honba; G.kyotaku = pub.kyotaku;
     G.oya = rotSeat(pub.oya, k);
@@ -582,8 +716,7 @@ const NetGame = (() => {
     G.doraIndicator = pub.doraIndicator;
     G.doraSeat = rotSeat(pub.doraSeat, k);
     G.doraDouIdx = pub.doraDouIdx;
-    G.drawPosList = (pub.drawPosList || []).map(p => ({ ...p, seat: rotSeat(p.seat, k) }));
-    G.kingCells = (pub.kingCells || []).map(p => ({ ...p, seat: rotSeat(p.seat, k) }));
+    applyWall();  // drawPosList/kingCells は wall パス (局中不変) から
     G.kingUsedCells = (pub.kingUsed || []).map(p => ({ ...p, seat: rotSeat(p.seat, k) }));
     G.kanDoraCells = (pub.kanDoraCells || []).map(p => ({ ...p, seat: rotSeat(p.seat, k) }));
     G.startSeat = rotSeat(pub.startSeat, k);
@@ -665,16 +798,37 @@ const NetGame = (() => {
     G.selected = null;
     renderAll();
   }
+  // 山の静的データ (局中不変)。 pub とは別パスで届くので 受信のたびに自分視点へ回転して反映
+  function applyWall() {
+    const k = S.rot, w = S.wall || {};
+    G.drawPosList = (w.drawPosList || []).map(p => ({ ...p, seat: rotSeat(p.seat, k) }));
+    G.kingCells = (w.kingCells || []).map(p => ({ ...p, seat: rotSeat(p.seat, k) }));
+  }
+  function ingestWall(json) {
+    try { S.wall = JSON.parse(json); } catch (e) { return; }
+    if (S.started && S.seatKnown) { applyWall(); renderAll(); }
+  }
   function ingestHand(json) {
     let h;
     try { h = JSON.parse(json); } catch (e) { return; }
+    if (h.full) {  // 定員オーバーで着席できなかった
+      joinError('席が埋まりました', 'この対戦は3人で始まりました。<br>次の対戦をお待ちください。');
+      return;
+    }
     if (h.seat) {
       S.myCanonical = h.seat;
       S.rot = (4 - ALL_SEATS.indexOf(h.seat)) % 4;
+      S.seatKnown = true;
     }
     G.hands.bottom = h.tiles || [];
     G.justDrawn = (h.justDrawn != null) ? h.justDrawn : null;
     G.justDrawnAll.bottom = G.justDrawn;  // リーチ中の暗槓候補等がツモ牌を参照できるように
+    // 席確定前に届いていた pub があればここで適用 (pub が先着した場合の取りこぼし防止)
+    if (S.seatKnown && S.pendingPub) {
+      const p = S.pendingPub; S.pendingPub = null;
+      ingestPub(p);
+      return;  // ingestPub の末尾で renderAll される
+    }
     renderAll();
   }
   function showGuestEnd(info) {
