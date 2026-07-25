@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>点数計算ドリル — おもろい三麻</title>
+  <link rel="stylesheet" href="style.css?v=0.9.7j">
+  <link rel="stylesheet" href="drill.css?v=0.9.7j">
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#0d5c3a">
+</head>
+<body class="drill-body">
+  <header class="drill-header">
+    <a href="index.html" class="drill-back" id="drill-back" aria-label="ロビーへ戻る">←</a>
+    <h1 class="drill-title">🀄 点数計算ドリル</h1>
+    <span class="drill-score" id="drill-score"></span>
+  </header>
+
+  <!-- ① メニュー -->
+  <main class="drill-menu" id="drill-menu">
+    <section class="drill-section">
+      <h2 class="drill-h2">ルール</h2>
+      <div class="drill-choices" role="radiogroup" aria-label="ルール">
+        <button class="drill-opt drill-opt--on" data-players="3">三麻 (3人)</button>
+        <button class="drill-opt" data-players="4">四麻 (4人)</button>
+      </div>
+      <p class="drill-note" id="drill-players-note">ツモの支払いが変わります (子が1人少ない)</p>
+    </section>
+
+    <section class="drill-section">
+      <h2 class="drill-h2">出題形式</h2>
+      <div class="drill-modes">
+        <button class="drill-mode" data-mode="tehai">
+          <span class="drill-mode__icon">🀇</span>
+          <span class="drill-mode__body">
+            <b>手牌から点数を出す</b>
+            <small>あがり手牌を見て、符を数えて点数を答える。実戦に一番近い</small>
+          </span>
+        </button>
+        <button class="drill-mode" data-mode="table">
+          <span class="drill-mode__icon">📖</span>
+          <span class="drill-mode__body">
+            <b>符と翻から点数を出す</b>
+            <small>「30符3翻 子のロン」→ 5800。点数表を反射で引けるようにする</small>
+          </span>
+        </button>
+        <button class="drill-mode" data-mode="split">
+          <span class="drill-mode__icon">💰</span>
+          <span class="drill-mode__body">
+            <b>ツモの支払いを分ける</b>
+            <small>「親からいくら / 子からいくら」を答える。三麻と四麻の差が出る形式</small>
+          </span>
+        </button>
+      </div>
+    </section>
+
+    <section class="drill-section" id="drill-stats-section">
+      <h2 class="drill-h2">これまでの成績</h2>
+      <div class="drill-stats" id="drill-stats"></div>
+      <button class="drill-reset" id="drill-reset">成績をリセット</button>
+    </section>
+  </main>
+
+  <!-- ② 出題 -->
+  <main class="drill-quiz" id="drill-quiz" hidden>
+    <div class="drill-q-head">
+      <span class="drill-q-mode" id="drill-q-mode"></span>
+      <span class="drill-q-streak" id="drill-q-streak"></span>
+    </div>
+
+    <div class="drill-q-body">
+      <div class="drill-hand" id="drill-hand"></div>
+      <p class="drill-cond" id="drill-cond"></p>
+      <p class="drill-ask" id="drill-ask"></p>
+    </div>
+
+    <div class="drill-answers" id="drill-answers"></div>
+
+    <div class="drill-q-foot">
+      <button class="drill-quit" id="drill-quit">やめる</button>
+    </div>
+  </main>
+
+  <!-- ③ 解説 -->
+  <div class="drill-explain-overlay" id="drill-explain" hidden>
+    <div class="drill-explain-modal" role="dialog" aria-modal="true" aria-labelledby="drill-verdict">
+      <h2 class="drill-verdict" id="drill-verdict"></h2>
+      <div class="drill-explain-body" id="drill-explain-body"></div>
+      <button class="drill-next" id="drill-next">次の問題 →</button>
+    </div>
+  </div>
+
+  <script src="score.js?v=0.9.7j"></script>
+  <script src="drill.js?v=0.9.7j"></script>
+</body>
+</html>

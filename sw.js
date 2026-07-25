@@ -5,7 +5,7 @@
 //   - HTML: ネットワーク優先 + オフライン時はキャッシュ (更新が確実に届く)
 //   - version.json: ネットワーク優先 (最新バージョン表示用)
 // ※ リリース時は SW_VERSION を index/game.html の ?v= と同じ値に bump すること
-const SW_VERSION = '0.9.6';
+const SW_VERSION = '0.9.7j';
 const CACHE_NAME = `omoroi-sanma-${SW_VERSION}`;
 
 const TILE_FILES = [
@@ -21,11 +21,16 @@ const PRECACHE = [
   'index.html',
   'game.html',
   'game',  // Cloudflare Pages の クリーンURL (308リダイレクト先)
+  'drill.html',
+  'drill',
   `style.css?v=${SW_VERSION}`,
   `script.js?v=${SW_VERSION}`,
   `firebase-config.js?v=${SW_VERSION}`,
   `net.js?v=${SW_VERSION}`,
   `netgame.js?v=${SW_VERSION}`,
+  `score.js?v=${SW_VERSION}`,
+  `drill.js?v=${SW_VERSION}`,
+  `drill.css?v=${SW_VERSION}`,
   'manifest.json',
   ...TILE_FILES.map(f => 'assets/' + encodeURIComponent(f)),
   // ボイスファイル (未配置なら 404 → allSettled で skip、 配置後に自動キャッシュ)

@@ -25,14 +25,25 @@ Realtime Database → 「ルール」 タブ → 全選択して削除 → 以�
     "rooms": {
       "$code": {
         ".read": "auth != null",
-        ".write": "auth != null"
+        ".write": "auth != null && (!data.exists() || data.child('meta/hostUid').val() === auth.uid || data.child('meta/createdAt').val() + 21600000 < now)",
+        "acts": {
+          ".write": "auth != null",
+          "$id": {
+            ".validate": "newData.child('uid').val() === auth.uid"
+          }
+        },
+        "players": {
+          "$uid": {
+            ".write": "auth != null && $uid === auth.uid"
+          }
+        }
       }
     },
     "hands": {
       "$code": {
+        ".write": "auth != null && root.child('rooms').child($code).child('meta/hostUid').val() === auth.uid",
         "$uid": {
-          ".read": "auth != null && auth.uid === $uid",
-          ".write": "auth != null"
+          ".read": "auth != null && auth.uid === $uid"
         }
       }
     }
@@ -40,7 +51,17 @@ Realtime Database → 「ルール」 タブ → 全選択して削除 → 以�
 }
 ```
 
-※ hands (各自の手牌) は本人しか読めない構造。rooms は匿名ログイン済みの参加者のみ読み書き可。
+### このルールが守っているもの (v0.9.7 で強化)
+
+| 制限 | 何を防ぐか |
+|---|---|
+| `acts/$id` の `.validate` で `uid === auth.uid` | **他人へのなりすまし**。これが無いと第三者が「被害者の uid」でパスを送り、ロンを強制的に見逃させられる |
+| `rooms/$code` の `.write` をホストに限定 | 第三者による盤面 (pub) の改竄。6時間経過したルームは他の人が再利用できる |
+| `players/$uid` は本人のみ | 他人の接続状態を勝手に「切断」にされるのを防ぐ |
+| `hands/$code` の書き込みをホストに限定 | 第三者が他人の手牌表示を壊すのを防ぐ |
+| `hands/$code/$uid` の読み取りは本人のみ | 手牌の盗み見。パスを `rooms/` の外に置いているのは、親の `.read` が下位に伝播して覗けてしまうため |
+
+⚠️ ルールを更新したら `index.html?local=1` ではなく **本番URLで1局** 通してください (local モードは Firebase を経由しないため、ルールの誤りを検出できません)。
 
 ## ⑤ Web アプリ登録
 プロジェクトの概要 → 「⚙ > プロジェクトの設定」 → 下部「マイアプリ」 → Webアイコン `</>`
