@@ -232,7 +232,9 @@ function makeGame() {
     TILE_NAMES, YAOCHU_IDS, RED_DORA_IDS, KITA_ID, ALL_SEATS,
     meldExtraTiles, openMeldIds, meldTriples, equivHand, seatWindOf,
     countYaochuKinds: (typeof countYaochuKinds === 'function' ? countYaochuKinds : null),
-    canKyuushu: (typeof canKyuushu === 'function' ? canKyuushu : null) })`;
+    canKyuushu: (typeof canKyuushu === 'function' ? canKyuushu : null),
+    isNagashiMangan: (typeof isNagashiMangan === 'function' ? isNagashiMangan : null),
+    SCORE_TABLE: (typeof SCORE_TABLE !== 'undefined' ? SCORE_TABLE : null) })`;
   const api = vm.runInContext(code, ctx, { filename: 'script.js' });
   return { ...api, ctx, dom };
 }

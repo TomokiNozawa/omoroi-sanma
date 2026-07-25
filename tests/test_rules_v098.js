@@ -118,6 +118,46 @@ const names = (r) => r.yakuList.map(y => y.name);
     check('空席は宣言できない', canKyuushu('right') === false);
   }
 
-  const ok = summary('v0.9.8 ルール精度 (三槓子 / 九種九牌)');
+  console.log('\n── 流し満貫 ─────────────────────────');
+  {
+    const { isNagashiMangan } = g;
+    const setup = (river, melds = { bottom: [], right: [], top: [], left: [] }) => {
+      G.rivers = { bottom: [], right: [], top: [], left: [] };
+      G.rivers.bottom = river;
+      G.melds = melds;
+    };
+    // 幺九牌だけの河 = 成立
+    setup([T(0,0), T(1,0), T(20,0), T(26,0), T(10,0)]);
+    check('河が全て幺九牌なら成立', isNagashiMangan('bottom') === true);
+
+    // 中張牌が1枚でも混じれば不成立
+    setup([T(0,0), T(1,0), T(5,0), T(26,0)]);
+    check('中張牌が混じると不成立', isNagashiMangan('bottom') === false);
+
+    // 河が空 (一度も捨てていない) は不成立
+    setup([]);
+    check('河が空なら不成立', isNagashiMangan('bottom') === false);
+
+    // 自分の捨て牌が鳴かれていたら不成立
+    setup([T(0,0), T(1,0), T(20,0)], {
+      bottom: [], right: [], left: [],
+      top: [{ type: 'pon', id: 20, from: 'bottom', tiles: [T(20,0), T(20,1), T(20,2)] }],
+    });
+    check('自分の捨て牌が鳴かれたら不成立', isNagashiMangan('bottom') === false);
+
+    // 他人どうしの鳴きは影響しない
+    setup([T(0,0), T(1,0), T(20,0)], {
+      bottom: [], right: [], left: [],
+      top: [{ type: 'pon', id: 21, from: 'left', tiles: [T(21,0), T(21,1), T(21,2)] }],
+    });
+    check('他人どうしの鳴きは影響しない', isNagashiMangan('bottom') === true);
+
+    // 満貫の点数が引ける (支払い計算に使う行)
+    const row = g.SCORE_TABLE.find(r => /満貫/.test(r.label) && !/跳|倍/.test(r.label));
+    check('満貫の行を正しく引ける', !!row && row.koTsumoKo === 2000 && row.oyaTsumo === 4000,
+      row ? row.label : '(見つからず)');
+  }
+
+  const ok = summary('v0.9.8 ルール精度 (三槓子 / 九種九牌 / 流し満貫)');
   process.exit(ok ? 0 : 1);
 })().catch(e => { console.error('\n実行時エラー:', e); process.exit(1); });

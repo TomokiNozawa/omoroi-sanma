@@ -549,6 +549,20 @@ function canKyuushu(seat) {
   if (ALL_SEATS.some(s => (G.melds[s] || []).length > 0)) return false;
   return countYaochuKinds(G.hands[seat]) >= 9;
 }
+// ─── 流し満貫 ────────────────────────────
+// 流局時、 自分の捨て牌が すべて幺九牌 かつ 一度も鳴かれていない と満貫。
+// 三麻は河が短く 字牌も余りやすいので 四麻より成立しやすく、 採用されることが多い。
+function isNagashiMangan(seat) {
+  const river = G.rivers[seat] || [];
+  if (river.length === 0) return false;
+  if (!river.every(t => YAOCHU_IDS.has(t.id))) return false;
+  // 自分の捨て牌が鳴かれていたら不成立 (ポン/明槓は meld.from に出所が入る)
+  for (const s of ALL_SEATS) {
+    for (const m of (G.melds[s] || [])) if (m.from === seat) return false;
+  }
+  return true;
+}
+
 function doKyuushu(seat) {
   if (!canKyuushu(seat)) return false;
   G.kyuushuSeat = seat;
@@ -3024,18 +3038,39 @@ function endRound(reason) {
         if (tmp13s.some(t => isTenpai13(t, meldTriples(seat)))) tenpaiSeats.push(seat);
       }
     }
-    // 点棒移動 (テンパイ料: 計3000点 = ノーテン家 → テンパイ家)
     const playingSeats = ALL_SEATS.filter(s => s !== G.emptySeat);
     const notenSeats = playingSeats.filter(s => !tenpaiSeats.includes(s));
-    if (tenpaiSeats.length > 0 && notenSeats.length > 0) {
+    // 流し満貫 (河が全て幺九牌 かつ 一度も鳴かれていない) — 成立時はテンパイ料より優先
+    const nagashiSeats = playingSeats.filter(s => isNagashiMangan(s));
+    let payLabel;
+    if (nagashiSeats.length > 0) {
+      const row = SCORE_TABLE.find(r => /満貫/.test(r.label) && !/跳|倍/.test(r.label));
+      for (const w of nagashiSeats) {
+        const isOya = (G.oya === w);
+        for (const p of playingSeats) {
+          if (p === w) continue;
+          const pay = isOya ? row.oyaTsumo : (p === G.oya ? row.koTsumoOya : row.koTsumoKo);
+          G.scores[p] -= pay; ryuDeltas[p] = (ryuDeltas[p] || 0) - pay;
+          G.scores[w] += pay; ryuDeltas[w] = (ryuDeltas[w] || 0) + pay;
+        }
+      }
+      payLabel = `🎊 <b>流し満貫</b> — ${nagashiSeats.map(s => seatShareLabel(s)).join('・')} (満貫の支払い)`;
+    } else if (tenpaiSeats.length > 0 && notenSeats.length > 0) {
+      // テンパイ料: 計3000点 = ノーテン家 → テンパイ家
       const totalPay = 3000;
       const payPer = Math.floor(totalPay / notenSeats.length);
       const recvPer = Math.floor(totalPay / tenpaiSeats.length);
       for (const s of notenSeats) { G.scores[s] -= payPer; ryuDeltas[s] = -payPer; }
       for (const s of tenpaiSeats) { G.scores[s] += recvPer; ryuDeltas[s] = recvPer; }
+      payLabel = '3000点 ノーテン→テンパイ';
+    } else {
+      payLabel = 'なし';
     }
     let txt = `山が尽きました。<br>`;
-    txt += `点棒移動: ${notenSeats.length > 0 && tenpaiSeats.length > 0 ? '3000点 ノーテン→テンパイ' : 'なし'}<br>`;
+    if (nagashiSeats.length > 0) {
+      txt += '捨て牌が すべて 1・9・字牌 で 一度も鳴かれなかったため <b>流し満貫</b> です。<br>';
+    }
+    txt += `点棒移動: ${payLabel}<br>`;
     txt += `現スコア: ${playingSeats.map(s => `${seatShareLabel(s)}=${G.scores[s].toLocaleString()}`).join(' / ')}`;
     if (G.kyotaku > 0) txt += `<br>供託 ${G.kyotaku}点 は 次のあがり者へ持ち越し`;
     // 全員の手牌公開 (テンパイ=明るく強調 / ノーテン=薄く)
@@ -3054,9 +3089,11 @@ function endRound(reason) {
     }
     txt += '</div>';
     document.getElementById('end-text').innerHTML = txt;
-    // 親流れ判定: 親がテンパイなら 連荘、 ノーテンなら 流れる (流局は 常に本場+1)
+    // 親流れ判定: 親がテンパイ (or 流し満貫成立) なら 連荘、 ノーテンなら 流れる
+    // (流局は 常に本場+1)
     G.honba++;
-    G.lastResult = tenpaiSeats.includes(G.oya) ? 'tenpaiOya' : 'notenOya';
+    G.lastResult = (tenpaiSeats.includes(G.oya) || nagashiSeats.includes(G.oya))
+      ? 'tenpaiOya' : 'notenOya';
   } else if (reason === '九種九牌') {
     // 途中流局: 点棒の移動なし、 親は続行、 本場+1
     const s = G.kyuushuSeat;
