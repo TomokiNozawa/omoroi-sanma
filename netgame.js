@@ -11,7 +11,11 @@ const NetGame = (() => {
   const CALL_OFFER_MS = 5000;    // ポン/明槓オファー待ち (超過で自動スルー)
   const OFFER_MS = 10000;        // ロンオファー待ち (超過で自動パス)
   const HEARTBEAT_MS = 15000;    // ホストの生存通知 (onDisconnect が効かないケースの保険)
-  const HOST_TIMEOUT_MS = 45000; // ゲスト: この時間 ホストの生存通知が途切れたら切断とみなす
+  // ゲスト: この時間 生存通知が途切れたら切断とみなす。
+  // ⚠️ 短くしすぎない。ホスト端末がバックグラウンドに回ると ブラウザが setInterval を
+  //   数十秒間隔まで間引くため、生きているホストを切断と誤判定する。
+  //   実際の切断は onDisconnect が即座に拾うので、こちらは余裕を持たせる。
+  const HOST_TIMEOUT_MS = 90000;
   const MAX_PLAYERS = 3;         // 三麻なので 卓は最大3人
 
   const S = {
@@ -800,7 +804,10 @@ const NetGame = (() => {
   }
   // 山の静的データ (局中不変)。 pub とは別パスで届くので 受信のたびに自分視点へ回転して反映
   function applyWall() {
-    const k = S.rot, w = S.wall || {};
+    // ⚠️ wall 未着で上書きしない。pub と wall は別パスなので到着順が入れ替わることがあり、
+    //   空配列で潰すと 山と王牌が画面から消える (pub 先着時に必ず起きる)
+    if (!S.wall) return;
+    const k = S.rot, w = S.wall;
     G.drawPosList = (w.drawPosList || []).map(p => ({ ...p, seat: rotSeat(p.seat, k) }));
     G.kingCells = (w.kingCells || []).map(p => ({ ...p, seat: rotSeat(p.seat, k) }));
   }

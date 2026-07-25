@@ -241,6 +241,18 @@ const waitHtml = (inst) => (inst.dom._els['net-wait-modal'] || {}).innerHTML || 
       g1.G.drawPosList.every((p, i) => p.douIdx === host.G.drawPosList[i].douIdx
         && p.dan === host.G.drawPosList[i].dan));
 
+    // pub と wall は別パスなので 到着順が入れ替わりうる (joinRoom は pub を先に購読する)。
+    // wall 未着のまま pub を適用して山を空配列で潰すと 画面から山が消える。
+    // 山は変えずに pub だけ動かす = wall は差分判定で再送されない状況を作って再現する。
+    g1.S.wall = null;
+    host.G.honba = 7;
+    host.NetGame.onRender();
+    await sleep(120);
+    check('wall 未着の pub が来ても 山を空にしない',
+      (g1.G.drawPosList || []).length === 94 && (g1.G.kingCells || []).length === 14,
+      `山=${(g1.G.drawPosList || []).length}件 / 王牌=${(g1.G.kingCells || []).length}件`);
+    check('pub 自体は反映されている', g1.G.honba === 7);
+
     // 次の局で山が変われば wall も更新される
     store.resetWrites();
     host.G.drawPosList = host.G.drawPosList.slice(0, 90);
