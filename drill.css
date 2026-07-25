@@ -93,7 +93,7 @@
   justify-content: center; align-items: flex-end;
   /* 親の padding の外まで使って牌を少しでも大きく見せる (14〜15枚を1行に収める都合で
      牌が小さくなりがちなため)。 はみ出さないよう width で相殺する */
-  margin: 0 -10px 10px; width: calc(100% + 20px);
+  margin: 0 -10px 16px; width: calc(100% + 20px);   /* 下の余白は「鳴」「雀頭」ラベルの分 */
 }
 .drill-hand:empty { display: none; }
 /* 面子のまとまり。 隙間で区切ると どの面子に何符ついたかを追いやすい */
@@ -106,7 +106,26 @@
   aspect-ratio: 3 / 4;     /* 牌画像 (69×92) の比率。 縮んでも潰れない */
   border-radius: 3px;
 }
-.drill-hand .drill-hand__win { outline: 2px solid #ff9800; outline-offset: 1px; border-radius: 3px; }
+/* 鳴いた面子は明刻 (暗刻の半分の符) になるため、見た目で区別できないと符が計算できない */
+.drill-hand__grp { position: relative; }
+.drill-hand__grp--open img { outline: 2px solid #ffb74d; outline-offset: -1px; }
+/* 面子の種別ラベル (ポン/明槓/暗槓/チー/雀頭)。 暗槓32符と明槓16符は倍違うので明示する */
+.drill-hand__grp[data-label]:not([data-label=""])::after {
+  content: attr(data-label); position: absolute; left: 50%; bottom: -13px;
+  transform: translateX(-50%);
+  font-size: 9px; line-height: 1; white-space: nowrap; color: #9ec;
+}
+.drill-hand__grp--open::after { color: #ffb74d; }
+/* あがり牌 (シャンポン待ちのロンだと この刻子が明刻になる) */
+.drill-hand .drill-hand__win { outline: 2px solid #ff5722; outline-offset: 1px; border-radius: 3px; }
+
+.drill-legend { font-size: 10px; color: #9ec; text-align: center; margin: 0 0 8px; line-height: 1.9; }
+.drill-legend[hidden] { display: none; }
+.drill-lg { display: inline-block; padding: 0 3px; border-radius: 3px; font-size: 9px; }
+.drill-lg--win { outline: 2px solid #ff5722; color: #ff8a65; }
+.drill-lg--open { outline: 1px solid #ffb74d; color: #ffb74d; }
+.drill-lg--pair { outline: 1px solid #9ec; color: #9ec; }
+.drill-note-inline { color: #ffcc80; }
 .drill-cond { font-size: 14px; line-height: 1.7; margin: 0 0 8px; text-align: center; }
 .drill-cond b { color: #ffeb3b; }
 .drill-ask { font-size: 15px; font-weight: 700; margin: 0; text-align: center; color: #aee5c8; }

@@ -77,6 +77,42 @@ const base = (o = {}) => Object.assign({
       bdd.map(b => `${b.label}${b.fu}`).join(' + '));
   }
 
+  console.log('\n── ロンで完成した刻子は明刻 (シャンポン待ち) ────────');
+  {
+    // 実ルール: ロンあがりの牌で完成した刻子は明刻として数える。
+    // 門前・中張の暗刻3つ + 両面ロン = 20 + 4*3 + 10 = 42 → 50符
+    const three = [koutsu(5), koutsu(8), koutsu(13), shuntsu(2)];
+    const tsumo = SC.calcFu(base({ melds: three, wait: 'shanpon', isTsumo: true }));
+    check('シャンポン ツモ は3つとも暗刻 (20+4*3+2=34 → 40符)', tsumo.fu === 40, `${tsumo.fu}符`);
+
+    const ronPlain = SC.calcFu(base({ melds: three, wait: 'shanpon', isTsumo: false }));
+    check('ロンでも ronMeldIdx 未指定なら従来どおり (20+4*3+10=42 → 50符)',
+      ronPlain.fu === 50, `${ronPlain.fu}符`);
+
+    // ronMeldIdx=0 の刻子が明刻(2符)になる → 20 + 2 + 4 + 4 + 10 = 40符
+    const ron = SC.calcFu(base({ melds: three, wait: 'shanpon', isTsumo: false, ronMeldIdx: 0 }));
+    check('ロンで完成した刻子は明刻になり 40符に下がる', ron.fu === 40, `${ron.fu}符`);
+    check('内訳に「ロンで完成」が出る',
+      ron.breakdown.some(b => b.label.includes('ロンで完成')),
+      ron.breakdown.map(b => b.label).join(' / '));
+
+    // 幺九の刻子なら 8符 → 4符
+    const yao = [koutsu(20), koutsu(8), shuntsu(2), shuntsu(11)];
+    const yaoTsumo = SC.calcFu(base({ melds: yao, wait: 'shanpon', isTsumo: true }));
+    const yaoRon = SC.calcFu(base({ melds: yao, wait: 'shanpon', isTsumo: false, ronMeldIdx: 0 }));
+    check('字牌の刻子もロンで完成なら 8符→4符',
+      yaoTsumo.fu === 40 && yaoRon.fu === 40, `ツモ${yaoTsumo.fu}符 / ロン${yaoRon.fu}符`);
+
+    // ツモなら ronMeldIdx があっても無視される
+    const ignored = SC.calcFu(base({ melds: three, wait: 'shanpon', isTsumo: true, ronMeldIdx: 0 }));
+    check('ツモなら ronMeldIdx は無視される', ignored.fu === 40, `${ignored.fu}符`);
+
+    // 槓子はロンで完成しない (カンは自分の手番のみ)
+    const kan = SC.calcFu(base({ melds: [kantsu(5), shuntsu(2), shuntsu(11), shuntsu(14)],
+      wait: 'shanpon', isTsumo: false, ronMeldIdx: 0 }));
+    check('槓子は ronMeldIdx の影響を受けない (暗槓16符のまま)', kan.fu === 50, `${kan.fu}符`);
+  }
+
   console.log('\n── 点数: 子 (公知の点数表と照合) ──────────');
   {
     const ko = (fu, han, isTsumo = false, players = 4) =>

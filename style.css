@@ -28,6 +28,9 @@ body {
   background: #143820; border: 2px solid #2d6b3f; border-radius: 12px;
   color: #fff; text-decoration: none; font-size: 16px; cursor: pointer;
   transition: transform 0.1s, background 0.1s;
+  /* ⚠️ 明示必須: このメニューは <a> と <button> が混在していて、
+     button はブラウザ既定が text-align:center のため 指定しないと揃えがバラつく */
+  text-align: left;
 }
 .lobby__btn:hover, .lobby__btn:active { background: #1d5530; transform: scale(0.99); }
 .lobby__btn--primary { background: #2d6b3f; border-color: #4caf50; }

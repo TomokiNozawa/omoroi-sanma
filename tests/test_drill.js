@@ -216,6 +216,43 @@ const D = loadDrill();
     check('手牌出題に 20符/25符の1翻が出ない', bad === 0, badCase || '800回すべて OK');
   }
 
+  console.log('\n── 三麻にチーは無い / 鳴きの種別 ──────────────');
+  {
+    let chiIn3 = 0, chiIn4 = 0;
+    for (let i = 0; i < 600; i++) {
+      const t3 = D.genTehai(3);
+      if (t3.hand.melds.some(m => m.type === 'shuntsu' && m.open)) chiIn3++;
+      const t4 = D.genTehai(4);
+      if (t4.hand.melds.some(m => m.type === 'shuntsu' && m.open)) chiIn4++;
+    }
+    check('三麻では順子を鳴いた形 (チー) を出さない', chiIn3 === 0, `三麻で${chiIn3}件`);
+    check('四麻ではチーが出る', chiIn4 > 0, `四麻で${chiIn4}件`);
+  }
+
+  console.log('\n── ロンで完成した刻子の指定 ──────────────');
+  {
+    let bad = 0, shanponRon = 0, wrongKind = 0;
+    for (let i = 0; i < 800; i++) {
+      const t = D.genTehai(i % 2 ? 3 : 4);
+      const h = t.hand;
+      if (h.wait === 'shanpon' && !h.isTsumo) {
+        shanponRon++;
+        if (h.ronMeldIdx < 0) {
+          // 暗刻が1つも無ければ指定されなくてよい
+          if (h.melds.some(m => m.type === 'koutsu' && !m.open)) bad++;
+        } else {
+          const m = h.melds[h.ronMeldIdx];
+          if (!m || m.type !== 'koutsu' || m.open) wrongKind++;
+        }
+      } else if (h.ronMeldIdx >= 0) {
+        bad++;   // シャンポンロン以外で指定されていたらおかしい
+      }
+    }
+    check('シャンポン待ちのロンだけ ronMeldIdx が入る', bad === 0, `不正=${bad}件`);
+    check('指定先は必ず「鳴いていない刻子」', wrongKind === 0, `不正=${wrongKind}件`);
+    check('シャンポンロンが実際に出題される', shanponRon > 0, `${shanponRon}回`);
+  }
+
   console.log('\n── 副露と暗刻の整合 ───────────────────');
   {
     // 門前 (isMenzen) の手に 明刻・明槓が混ざっていないか
