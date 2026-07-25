@@ -675,6 +675,9 @@ const NetGame = (() => {
     S.net.setVal(`rooms/${S.room}/meta/status`, 'ended');
     // 後始末: acts と 秘匿手牌は用済み (pub は結果表示に使うので残す)。
     // 放置すると DB 上に単調に積み上がるため 半荘終了時に必ず掃除する。
+    // ⚠️ rooms/{code} 自体は消さないこと。 hands の書き込み権限は rules で
+    //   「rooms/{code}/meta/hostUid == 自分」で判定しているため、 meta を先に消すと
+    //   自分の hands すら消せなくなる (本番 rules で実際に PERMISSION_DENIED を確認済み)。
     clearInterval(S.hbTimer);
     S.net.setVal(`rooms/${S.room}/acts`, null);
     S.net.setVal(`hands/${S.room}`, null);

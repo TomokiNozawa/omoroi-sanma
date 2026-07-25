@@ -51,6 +51,19 @@ Realtime Database → 「ルール」 タブ → 全選択して削除 → 以�
 }
 ```
 
+**この内容で 2026-07-25 に本番へ公開済み** (野沢さん作業)。本番で攻撃を試して全項目ブロックを実測済み。
+
+### ⚠️ コードを書く時の注意 (実際に踏んだ罠)
+
+`hands/{code}` の書き込み権限は **`rooms/{code}/meta/hostUid` を参照して判定**している。
+そのため **rooms を先に消すと hands が消せなくなる**（参照先が無くなり権限判定に失敗する）。
+
+```
+❌ rooms/{code} を削除 → hands/{code} を削除   … 2つ目が PERMISSION_DENIED
+✅ meta を書く → hands/{code} を削除            … createRoom はこの順序
+✅ acts と hands だけ削除 (meta は残す)         … onGameEnd はこの順序
+```
+
 ### このルールが守っているもの (v0.9.7 で強化)
 
 | 制限 | 何を防ぐか |
