@@ -10,8 +10,14 @@ node tests/test_net_v097.js
 
 | ファイル | 内容 |
 |---|---|
-| `harness.js` | net.js / netgame.js を Node 上で動かす最小環境 (FakeNet + DOM スタブ) |
-| `test_net_v097.js` | v0.9.7 — 入室制御・切断検知・pub 差分判定・山データ分離・後始末 (40項目) |
+| `harness.js` | net.js / netgame.js を Node 上で動かす最小環境 (FakeNet + DOM スタブ)。`makeGame()` で script.js の役判定も取れる |
+| `test_net_v097.js` | v0.9.7 — 入室制御・切断検知・pub 差分判定・山データ分離・後始末 (47項目) |
+| `test_score.js` | score.js の符計算・点数計算を 早見表と突き合わせ (78項目) |
+| `test_yaku_wind.js` | 風牌の役牌判定 — ピンフの雀頭と刻子の役牌で基準が揃っているか (13項目) |
+| `test_drill.js` | 点数計算ドリルの出題ロジック。翻数が手牌から確定するか等 (39項目) |
+| `test_500.js` | ドリル500問を実際に回し、早見表と第2実装に突き合わせ (8項目) |
+| `test_rules_v098.js` | v0.9.8 — 三槓子 / 九種九牌 / 流し満貫 (26項目) |
+| `test_coach.js` | AI採点コーチ — 押し引き / 良形 / 打点 / 役 (18項目) |
 
 ## 設計メモ
 

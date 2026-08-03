@@ -469,12 +469,19 @@ function enumerateDecomps(hand) {
   return out;
 }
 
-// 役牌になる id (雀頭がこれだと ピンフ不成立): 三元牌 + 東 (場風/親自風) + 南 (南場)
+// 役牌になる id (雀頭がこれだと ピンフ不成立): 三元牌 + 場風牌 + 自風牌
+// ⚠️ 自風を見落とすと、自風が南/西の子が その風牌を雀頭にした時に
+//    本来は役牌 (ピンフ不成立) なのに ピンフが付いてしまう。
+//    また 東を無条件に役牌にすると、南場で場風でも自風でもない東を
+//    役牌と誤判定する。 判定基準は countYakuhai (刻子の役牌) と必ず揃えること
 function isYakuhaiPairId(id, context) {
-  if (id === 24 || id === 25 || id === 26) return true;  // 白發中
-  if (id === 20) return true;  // 東 (東場の場風 + 親の自風)
-  if (id === 21 && context.round && context.round.startsWith('南')) return true;  // 南 (南場)
-  return false;
+  if (id === 24 || id === 25 || id === 26) return true;   // 白發中
+  // 場風: 東場=東(20) / 南場=南(21)
+  const roundId = (context.round && context.round.startsWith('南')) ? 21 : 20;
+  if (id === roundId) return true;
+  // 自風: 東=20 / 南=21 / 西=22 (seatWind 未指定の旧呼び出しは 親=東 とみなす)
+  const swId = { '東': 20, '南': 21, '西': 22 }[context.seatWind || (context.isOya ? '東' : null)];
+  return swId != null && id === swId;
 }
 
 // ピンフ: 全順子 + 雀頭が役牌以外 + 和了牌が両面待ち
