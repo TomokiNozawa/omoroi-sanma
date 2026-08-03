@@ -7,8 +7,11 @@
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
-const { check, summary } = require('./harness');
+const { check, summary, makeGame } = require('./harness');
 const SC = require('../score.js');
+
+// 翻数は対局側の calcYaku で判定するので、ドリルにもそれを渡す (本番と同じ経路で検証する)
+const ENGINE = makeGame();
 
 // drill.js を DOM スタブ付きで読み込み、出題関数を取り出す
 function loadDrill() {
@@ -32,12 +35,15 @@ function loadDrill() {
     location: { href: '' },
     localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
     ScoreCalc: SC,
+    calcYaku: ENGINE.calcYaku,
+    TILE_IMG: ENGINE.TILE_IMG,
   };
   ctx.window = ctx;
   vm.createContext(ctx);
   const src = fs.readFileSync(path.join(__dirname, '..', 'drill.js'), 'utf8');
   return vm.runInContext(src + `
-;({ genTehai, handTiles, fuChoices, scoreChoices, splitChoices, S, TILE_IMG, SHUNTSU_STARTS })`,
+;({ genTehai, handTiles, scoreChoices, splitChoices, judgeHand, toYakuInput,
+    S, TILE_IMG, SHUNTSU_STARTS })`,
     ctx, { filename: 'drill.js' });
 }
 
@@ -103,16 +109,6 @@ const D = loadDrill();
 
   console.log('\n── 選択肢に正解が必ず含まれる ───────────────');
   {
-    // 符の選択肢
-    let missFu = 0;
-    for (const fu of [20, 25, 30, 40, 50, 60, 70, 80]) {
-      const ch = D.fuChoices(fu);
-      if (!ch.includes(fu)) missFu++;
-      if (ch.length !== 4) missFu++;
-      if (new Set(ch).size !== ch.length) missFu++;  // 重複なし
-    }
-    check('符の選択肢は 正解を含む4択で重複なし', missFu === 0, `不正=${missFu}件`);
-
     // 点数の選択肢
     let missScore = 0, dupScore = 0;
     for (let i = 0; i < 400; i++) {
@@ -157,11 +153,13 @@ const D = loadDrill();
       const ch = D.splitChoices({ calc }, correct);
       const rights = ch.filter(c => c.correct);
       if (rights.length !== 1) missSplit++;
-      const keys = ch.map(c => c.key);
-      if (new Set(keys).size !== keys.length) dupSplit++;
+      // 画面に出る表記 (label) で重複を見る。合計が違っても表記が同じだと選べない
+      const labels = ch.map(c => c.label);
+      if (new Set(labels).size !== labels.length) dupSplit++;
     }
     check('支払いの選択肢は 正解がちょうど1つ', missSplit === 0, `不正=${missSplit}件`);
-    check('支払いの選択肢に重複がない', dupSplit === 0, `重複=${dupSplit}件`);
+    check('支払いの選択肢は表記が重複しない (700・1300 が2つ並ばない)', dupSplit === 0,
+      `重複=${dupSplit}件`);
 
     let thinSplit = 0, thinSplitCase = null;
     for (let i = 0; i < 400; i++) {
@@ -178,6 +176,92 @@ const D = loadDrill();
     }
     check('支払いも必ず4択になる', thinSplit === 0,
       thinSplit ? `${thinSplit}件 (例: ${thinSplitCase})` : '400通り すべて4択');
+  }
+
+  console.log('\n── 翻数が手牌から確定する (翻数を画面に出さないため) ─────');
+  {
+    // 出題では翻数も符も伏せる。 手牌+状況から翻が一意に決まらないと解けない問題になる。
+    let noYaku = 0, yakuman = 0, outOfRange = 0, mismatch = 0, pinfuConflict = 0;
+    let riichiWhenOpen = 0, doraTooMany = 0, hanSumBad = 0;
+    let sawRiichi = 0, sawDora = 0, hanSeen = new Set();
+    for (let i = 0; i < 800; i++) {
+      const t = D.genTehai(i % 2 ? 3 : 4);
+      hanSeen.add(t.han);
+      // 役が1つも無い手は あがれないので出題してはいけない
+      if (!t.yakuList || !t.yakuList.length) noYaku++;
+      // 役満・満貫超えは符が効かないので出さない (符を数える練習にならない)
+      if (t.yakuList && t.yakuList.some(y => y.han >= 13)) yakuman++;
+      if (t.han < 1 || t.han > 5) outOfRange++;
+      // 手役 + リーチ + ドラ の合計が han と一致するか
+      const sum = t.yakuList.reduce((n, y) => n + y.han, 0);
+      if (sum !== t.han) hanSumBad++;
+      // 副露手にリーチは付かない
+      if (t.isRiichi && !t.hand.isMenzen) riichiWhenOpen++;
+      if (t.doraCount < 0 || t.doraCount > 2) doraTooMany++;
+      if (t.isRiichi) sawRiichi++;
+      if (t.doraCount > 0) sawDora++;
+
+      // 手役だけを判定し直して、リーチ+ドラを引いた分と一致するか (= 手牌から読み取れる翻)
+      const bare = Object.assign({}, t.hand, { isRiichi: false });
+      const j = D.judgeHand(bare);
+      if (!j) { mismatch++; continue; }
+      const expect = j.han + (t.isRiichi ? 1 : 0) + t.doraCount;
+      if (expect !== t.han) mismatch++;
+      // 符計算(score.js)と役判定(calcYaku)でピンフの解釈が割れた手は出さない
+      if (j.isPinfu !== t.hand.isPinfu) pinfuConflict++;
+    }
+    check('役なしの手を出題しない', noYaku === 0, `${noYaku}件`);
+    check('役満を出題しない', yakuman === 0, `${yakuman}件`);
+    check('翻数が 1〜5翻に収まる (符が効く範囲)', outOfRange === 0,
+      `範囲外=${outOfRange}件 / 出た翻=${[...hanSeen].sort((a, b) => a - b).join('/')}`);
+    check('役の内訳の合計が翻数と一致する', hanSumBad === 0, `不一致=${hanSumBad}件`);
+    check('手牌から読み取れる翻数と出題の翻数が一致する', mismatch === 0, `不一致=${mismatch}件`);
+    check('ピンフの解釈が符計算と役判定で食い違わない', pinfuConflict === 0, `食い違い=${pinfuConflict}件`);
+    check('副露手にリーチが付かない', riichiWhenOpen === 0, `${riichiWhenOpen}件`);
+    check('ドラは0〜2枚', doraTooMany === 0, `範囲外=${doraTooMany}件`);
+    check('リーチもドラも実際に出題される', sawRiichi > 0 && sawDora > 0,
+      `リーチ${sawRiichi}回 / ドラ${sawDora}回`);
+  }
+
+  console.log('\n── script.js と同じスコープで読める (識別子の衝突なし) ─────');
+  {
+    // drill.html は script.js と drill.js を同じグローバルスコープで読む。
+    // 同名の const/let/class があると「重複宣言」で drill.js が丸ごと動かなくなる
+    // (実際に TILE_IMG の重複で全機能が死んだ)。 機械的に検出しておく。
+    const tops = (file) => {
+      const set = new Set();
+      const re = /^(?:const|let|var|function|class)\s+([A-Za-z_$][\w$]*)/;
+      for (const line of fs.readFileSync(path.join(__dirname, '..', file), 'utf8').split('\n')) {
+        const m = re.exec(line);
+        if (m) set.add(m[1]);
+      }
+      return set;
+    };
+    const d = tops('drill.js');
+    const dup = [...tops('script.js')].filter(n => d.has(n));
+    check('drill.js と script.js でトップレベル識別子が衝突しない', dup.length === 0,
+      dup.length ? `衝突: ${dup.join(', ')}` : `drill.js の宣言 ${d.size}件 すべて衝突なし`);
+
+    // drill.html が両方を読んでいること (読み忘れると翻数を判定できず出題が壊れる)
+    const html = fs.readFileSync(path.join(__dirname, '..', 'drill.html'), 'utf8');
+    check('drill.html が score.js / script.js / drill.js を読んでいる',
+      /score\.js/.test(html) && /script\.js/.test(html) && /drill\.js/.test(html));
+  }
+
+  console.log('\n── 役判定エンジンが対局と共通 ──────────────');
+  {
+    // calcYaku が無い環境 (script.js 未読込) では出題が破綻するので、
+    // 変換 (toYakuInput) が calcYaku の期待する形になっているか直接確かめる
+    const t = D.genTehai(3);
+    const inp = D.toYakuInput(t.hand);
+    const kanCount = t.hand.melds.filter(m => m.type === 'kantsu').length;
+    check('変換後の手牌は常に14枚 (槓は3枚等価)', inp.tiles.length === 14, `${inp.tiles.length}枚`);
+    check('槓の4枚目が extraTiles に入る', inp.context.extraTiles.length === kanCount,
+      `槓${kanCount}個 / extra${inp.context.extraTiles.length}枚`);
+    check('あがり牌が context に入る', inp.context.winTile && inp.context.winTile.id != null);
+    check('場風が calcYaku の形式 (東/南) で渡る', /^[東南]/.test(inp.context.round), inp.context.round);
+    const res = ENGINE.calcYaku(inp.tiles, inp.context);
+    check('対局の calcYaku があがり形と認識する', !res.error, res.error || 'OK');
   }
 
   console.log('\n── ピンフ判定 ────────────────────────');

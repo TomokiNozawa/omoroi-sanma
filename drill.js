@@ -10,17 +10,11 @@
 
 /* global ScoreCalc */
 
-// ─── 牌の定義 (script.js と同じ id 体系。 変更時は両方直すこと) ───
+// ─── 牌の定義 ───
 //   0=1m 1=9m / 2..10=1p..9p / 11..19=1s..9s / 20=東 21=南 22=西 23=北 24=白 25=發 26=中
-const TILE_IMG = {
-  0: '1m.png', 1: '9m.png',
-  2: '1p.png', 3: '2p.png', 4: '3p.png', 5: '4p.png', 6: '5p.png',
-  7: '6p.png', 8: '7p.png', 9: '8p.png', 10: '9p.png',
-  11: '1s.png', 12: '2s.png', 13: '3s.png', 14: '4s.png', 15: '5s.png',
-  16: '6s.png', 17: '7s.png', 18: '8s.png', 19: '9s.png',
-  20: '東.png', 21: '南.png', 22: '西.png', 23: '北.png',
-  24: '白.png', 25: '発.png', 26: '中.png',
-};
+// 牌画像のマップ (TILE_IMG) は script.js のものをそのまま使う。
+// ⚠️ ここで再定義すると同名 const の重複宣言で drill.js 全体が動かなくなる
+//    (script.js と同じグローバルスコープで読まれるため)。
 const TILE_NAME = {
   0: '一萬', 1: '九萬', 2: '一筒', 3: '二筒', 4: '三筒', 5: '四筒', 6: '五筒',
   7: '六筒', 8: '七筒', 9: '八筒', 10: '九筒', 11: '一索', 12: '二索', 13: '三索',
@@ -43,7 +37,8 @@ const S = {
   players: 3,
   mode: null,
   q: null,        // 現在の問題
-  step: 'fu',     // tehai モードの段階: 'fu' → 'score'
+  step: 'score',
+  revealed: true, // 選択肢を出しているか (手牌形式は 自分のタイミングで開く)
   stats: null,
   lastKey: '',    // 直前の出題条件 (同じ問題の連続を避ける)
 };
@@ -60,7 +55,7 @@ function saveStats() {
 
 // ─── 手牌の生成 ───────────────────────────
 // 符が偏らないよう 刻子・槓子・待ちの形をばらけさせる。
-function genTehai(players) {
+function genTehaiRaw(players) {
   const isMenzen = Math.random() < 0.72;          // 門前を多めに (符の変化が出やすい)
   const isTsumo = Math.random() < 0.5;
   const isOya = Math.random() < 0.35;
@@ -121,20 +116,114 @@ function genTehai(players) {
     || ScoreCalc.WINDS[seatWind] === pairId || ScoreCalc.WINDS[roundWind] === pairId;
   hand.isPinfu = isMenzen && melds.every(m => m.type === 'shuntsu') && wait === 'ryanmen' && !pairIsYakuhai;
 
-  let han = pick([1, 1, 2, 2, 2, 3, 3, 4]);
-  // 手の形から確実につく役を見積もって翻数の下限にする。
-  // これが無いと「暗刻3つ (三暗刻) なのに1翻」のような、麻雀として成立しない問題が出る
-  const nonShuntsu = melds.filter(m => m.type !== 'shuntsu');
-  const concealed = nonShuntsu.filter(m => !m.open);
-  const kanCount = melds.filter(m => m.type === 'kantsu').length;
-  let minHan = 1;
-  if (nonShuntsu.length === 4) minHan += 2;                 // 対々和
-  if (concealed.length >= 3) minHan += 2;                   // 三暗刻
-  if (kanCount >= 3) minHan += 2;                           // 三槓子
-  if (hand.isPinfu && isTsumo) minHan = Math.max(minHan, 2);// ピンフ + 門前清自摸和
-  if (hand.isPinfu && !isTsumo) minHan = Math.max(minHan, 1);
-  han = Math.max(han, minHan);
-  return { hand, han, isOya, players };
+  return { hand, isOya, players };
+}
+
+// 出題用の手牌。 翻数は手の中身から判定するので、出題に使えない手は引き直す。
+//   ・役なし     … あがれない手なので問題にならない
+//   ・役満       … 符も翻も関係なく固定点なので 点数計算の練習にならない
+//   ・5翻以上    … 満貫で頭打ちになり符が効かない (符を数える意味が無くなる)
+//   ・ピンフ判定の食い違い … 符計算(score.js)と役判定(calcYaku)で解釈が割れる手は
+//                            符と翻が矛盾するので出さない
+function genTehai(players) {
+  let fallback = null;
+  for (let attempt = 0; attempt < 400; attempt++) {
+    const t = genTehaiRaw(players);
+    const base = judgeHand(t.hand);
+    if (!base) continue;
+    if (base.isYakuman) continue;
+    if (base.isPinfu !== t.hand.isPinfu) continue;
+    if (base.han < 1 || base.han > 4) continue;
+
+    // リーチ (門前のみ) と ドラ を 合計5翻以内で足す。
+    // 状況文に「リーチ / ドラN」を出すので、手役と合わせて翻数が確定する
+    let han = base.han;
+    const yakuList = base.yakuList.slice();
+    let isRiichi = false;
+    if (t.hand.isMenzen && han < 4 && Math.random() < 0.45) {
+      isRiichi = true;
+      han += 1;
+      yakuList.push({ name: 'リーチ', han: 1 });
+    }
+    const doraRoom = Math.max(0, 5 - han);
+    const doraCand = [0, 0, 1, 1, 2].filter(v => v <= doraRoom);
+    const doraCount = doraCand.length ? pick(doraCand) : 0;
+    if (doraCount > 0) {
+      han += doraCount;
+      yakuList.push({ name: `ドラ${doraCount}`, han: doraCount });
+    }
+    t.hand.isRiichi = isRiichi;
+    const out = { hand: t.hand, han, yakuList, isOya: t.isOya, players, isRiichi, doraCount };
+    if (!fallback) fallback = out;
+    return out;
+  }
+  // 引き直しが尽きた場合の保険 (必ず役が付く形: 全順子+数牌雀頭+両面 = ピンフ)
+  return fallback || {
+    hand: {
+      melds: [{ type: 'shuntsu', id: 2 }, { type: 'shuntsu', id: 5 },
+        { type: 'shuntsu', id: 11 }, { type: 'shuntsu', id: 14 }],
+      pair: 8, wait: 'ryanmen', isTsumo: false, isMenzen: true,
+      seatWind: '南', roundWind: '東', isChiitoi: false, isPinfu: true,
+      ronMeldIdx: -1, isRiichi: false,
+    },
+    han: 1, yakuList: [{ name: 'ピンフ', han: 1 }],
+    isOya: false, players, isRiichi: false, doraCount: 0,
+  };
+}
+
+// ─── 役の判定 (対局と同じ calcYaku を使う) ──────────────
+// 翻数を画面に出さず「状況と手牌だけ見て点数を出す」形式にするには、
+// 手の中身から翻数が一意に決まらないといけない。
+// 役判定は対局側 (script.js) の calcYaku に委ねる — 面子分解を全列挙して
+// 高点法で最も高い解釈を選ぶので、牌姿から人が読み取れる翻数と一致する。
+// ⚠️ ここで自前実装すると対局と二重管理になり、翻数がズレる (= 教材として害)。
+
+// 面子構造 → calcYaku の入力 { tiles(14枚), context }
+// 槓は 3枚等価 + 4枚目を extraTiles に入れる (calcYaku がその枚数でカン数を数える)
+function toYakuInput(hand) {
+  const tiles = [];
+  const extraTiles = [];
+  const openMeldIds = [];
+  for (const m of hand.melds) {
+    if (m.type === 'shuntsu') {
+      tiles.push({ id: m.id }, { id: m.id + 1 }, { id: m.id + 2 });
+      if (m.open) openMeldIds.push(m.id, m.id + 1, m.id + 2);
+    } else {
+      tiles.push({ id: m.id }, { id: m.id }, { id: m.id });
+      if (m.type === 'kantsu') extraTiles.push({ id: m.id });
+      if (m.open) openMeldIds.push(m.id);
+    }
+  }
+  tiles.push({ id: hand.pair }, { id: hand.pair });
+  // あがり牌 (シャンポンの明刻化・ピンフの両面判定に使う)
+  const wp = winTilePos(hand);
+  const groups = handGroups(hand);
+  const winId = wp ? groups[wp.g].ids[wp.t] : hand.pair;
+  return {
+    tiles,
+    context: {
+      isTsumo: hand.isTsumo,
+      isRiichi: !!hand.isRiichi,
+      winTile: { id: winId },
+      extraTiles, openMeldIds,
+      seatWind: hand.seatWind,
+      round: hand.roundWind,   // calcYaku は startsWith('東'/'南') で場風を見る
+      kitas: 0,
+    },
+  };
+}
+
+// 手牌から役・翻数を求める。出題に使えない手 (あがり形でない/役なし) は null。
+function judgeHand(hand) {
+  if (typeof calcYaku !== 'function') return null;   // script.js 未読込
+  const inp = toYakuInput(hand);
+  let res;
+  try { res = calcYaku(inp.tiles, inp.context); } catch (e) { return null; }
+  if (!res || res.error || !res.yakuList || !res.yakuList.length) return null;
+  return {
+    yakuList: res.yakuList, han: res.han, isYakuman: !!res.isYakuman,
+    isPinfu: res.yakuList.some(y => y.name === 'ピンフ'),
+  };
 }
 
 // 手牌の牌並び (表示用)
@@ -182,19 +271,6 @@ function tileImgHtml(id, cls = '') {
 
 // ─── 選択肢 ────────────────────────────
 // 誤答は「ありがちな間違い」を混ぜる (符の取り違え・親子の取り違え・ツモロンの取り違え)
-// hand を渡すと その手ではあり得ない符を誤答から外す。
-// 20符は平和ツモ専用・25符は七対子専用なので、面子手のロンに混ぜると
-// 「麻雀的にあり得ない選択肢」になり、消去法で解けてしまう
-function fuChoices(correct, hand) {
-  let pool = [20, 25, 30, 40, 50, 60, 70, 80, 90];
-  if (hand) {
-    if (!hand.isChiitoi) pool = pool.filter(v => v !== 25);
-    if (!(hand.isPinfu && hand.isTsumo)) pool = pool.filter(v => v !== 20);
-  }
-  pool = pool.filter(v => v !== correct);
-  const near = pool.sort((a, b) => Math.abs(a - correct) - Math.abs(b - correct)).slice(0, 5);
-  return shuffle([correct, ...shuffle(near).slice(0, 3)]);
-}
 function scoreChoices(q, correctTotal) {
   const { fu, han, isOya, isTsumo, players } = q.calc;
   const cand = new Set([correctTotal]);
@@ -233,12 +309,14 @@ function pickDistinct(gen) {
 }
 
 function newQuestion() {
-  S.step = 'fu';
+  S.step = 'score';
+  S.revealed = (S.mode !== 'tehai');   // 手牌形式だけ 選択肢を隠して考える時間を作る
   if (S.mode === 'tehai') {
     const t = genTehai(S.players);
     const fuRes = ScoreCalc.calcFu(t.hand);
     S.q = {
-      kind: 'tehai', hand: t.hand, fuRes,
+      kind: 'tehai', hand: t.hand, fuRes, yakuList: t.yakuList,
+      isRiichi: t.isRiichi, doraCount: t.doraCount,
       calc: { fu: fuRes.fu, han: t.han, isOya: t.isOya, isTsumo: t.hand.isTsumo, players: S.players },
     };
   } else if (S.mode === 'table') {
@@ -276,9 +354,12 @@ function condText(q) {
     const menzen = h.isMenzen ? '門前' : '副露あり';
     const waitName = { ryanmen: '両面待ち', shanpon: 'シャンポン待ち', kanchan: '嵌張待ち',
       penchan: '辺張待ち', tanki: '単騎待ち' }[h.wait];
-    // 場風は雀頭・刻子が役牌かどうかの判定に必要なので必ず出す (無いと符が計算できない)
-    return `${rule} / <b>${h.roundWind}場</b>・自風<b>${h.seatWind}</b> / ${who} / ${how} / ${menzen} / ${waitName}<br>`
-      + `役は合わせて <b>${c.han}翻</b> でした`;
+    // 翻数と符は出さない (手牌と状況だけを見て点数まで出す形式)。
+    // 場風・自風は 役牌と符の判定に必要 / リーチとドラは翻数に効くので必ず出す
+    const riichi = q.isRiichi ? ' / <b>リーチ</b>' : '';
+    const dora = q.doraCount > 0 ? ` / <b>ドラ ${q.doraCount}</b>` : ' / ドラなし';
+    return `${rule} / <b>${h.roundWind}場</b>・自風<b>${h.seatWind}</b> / ${who} / ${how}<br>`
+      + `${menzen} / ${waitName}${riichi}${dora}`;
   }
   return `${rule} / ${who} の ${how}<br><b>${c.fu}符 ${c.han}翻</b>`;
 }
@@ -324,20 +405,25 @@ function renderQuestion() {
 
   const ansEl = $('drill-answers');
   ansEl.innerHTML = '';
-  if (S.step === 'fu') {
-    $('drill-ask').textContent = 'この手は何符?';
-    for (const v of fuChoices(q.calc.fu, q.hand)) {
-      ansEl.appendChild(mkAnswer(`${v}符`, (btn) => answerFu(v, btn), null, v === q.calc.fu));
-    }
-  } else if (S.mode === 'split') {
-    $('drill-ask').textContent = 'ツモの支払いはどれ?';
-    const correct = ScoreCalc.calcScore(q.calc);
+  const revealEl = $('drill-reveal');
+
+  // ツモは合計点ではなく「2600オール」「1300・2600」の形で答える (実戦で言う形)
+  const asSplit = (S.mode === 'split') || (q.kind === 'tehai' && q.calc.isTsumo);
+  $('drill-ask').textContent = asSplit ? 'ツモの支払いはどれ?' : '点数は?';
+
+  if (!S.revealed) {
+    // 選択肢を出さずに考える時間を作る (自分のタイミングで開く)
+    if (revealEl) revealEl.hidden = false;
+    return;
+  }
+  if (revealEl) revealEl.hidden = true;
+
+  const correct = ScoreCalc.calcScore(q.calc);
+  if (asSplit) {
     for (const c of splitChoices(q, correct)) {
       ansEl.appendChild(mkAnswer(c.label, (btn) => answerSplit(c, correct, btn), c.sub, c.correct));
     }
   } else {
-    $('drill-ask').textContent = '点数は?';
-    const correct = ScoreCalc.calcScore(q.calc);
     for (const v of scoreChoices(q, correct.total)) {
       ansEl.appendChild(mkAnswer(`${v.toLocaleString()}点`, (btn) => answerScore(v, correct, btn),
         null, v === correct.total));
@@ -346,6 +432,13 @@ function renderQuestion() {
   // 最初の選択肢にフォーカス (キーボードでも回せるように)
   const first = ansEl.querySelector('.drill-ans');
   if (first) first.focus();
+}
+
+// 考え終わったら選択肢を開く
+function revealAnswers() {
+  if (S.revealed) return;
+  S.revealed = true;
+  renderQuestion();
 }
 
 function mkAnswer(label, onClick, sub, isCorrect) {
@@ -360,19 +453,22 @@ function mkAnswer(label, onClick, sub, isCorrect) {
 // 支払い内訳の選択肢: 三麻/四麻の取り違え・親子の取り違えを混ぜる
 function splitChoices(q, correct) {
   const c = q.calc;
+  // 実戦の言い方に合わせる: 親ツモ=「2600オール」 / 子ツモ=「1300・2600」(子から・親からの順)
   const fmt = (r) => {
     if (r.detail.fromKo != null && r.detail.fromOya == null) {
       return { label: `${r.detail.fromKo.toLocaleString()}点オール`,
         sub: `計 ${r.total.toLocaleString()}点` };
     }
-    return { label: `親 ${r.detail.fromOya.toLocaleString()} / 子 ${r.detail.fromKo.toLocaleString()}`,
-      sub: `計 ${r.total.toLocaleString()}点` };
+    return { label: `${r.detail.fromKo.toLocaleString()}・${r.detail.fromOya.toLocaleString()}`,
+      sub: `子${r.detail.fromKo.toLocaleString()} / 親${r.detail.fromOya.toLocaleString()} — 計 ${r.total.toLocaleString()}点` };
   };
   const seen = new Set();
   const out = [];
   const push = (r) => {
     const f = fmt(r);
-    const key = f.label + '|' + f.sub;
+    // ⚠️ 重複判定は label だけで見る。 合計 (sub) が違っても表示が同じ選択肢
+    //    (例: 三麻と四麻の「700・1,300」) が並ぶと、見た目で区別できず選べない
+    const key = f.label;
     if (seen.has(key)) return;
     seen.add(key);
     out.push({ ...f, total: r.total, key });
@@ -413,13 +509,6 @@ function record(ok) {
   saveStats();
 }
 
-function answerFu(v, btn) {
-  const ok = (v === S.q.calc.fu);
-  markAnswered(btn);
-  record(ok);
-  showExplain(ok, fuExplainHtml(), () => { S.step = 'score'; renderQuestion(); },
-    ok ? '正解! 次は点数です' : '次は点数です');
-}
 function answerScore(v, correct, btn) {
   const ok = (v === correct.total);
   markAnswered(btn);
@@ -430,10 +519,21 @@ function answerSplit(choice, correct, btn) {
   const ok = !!choice.correct;
   markAnswered(btn);
   record(ok);
-  showExplain(ok, splitExplainHtml(correct), newQuestion);
+  // 手牌形式のツモは「役→符→点数」を解説する (split モードは三麻/四麻の差が主題)
+  const html = (S.q.kind === 'tehai') ? scoreExplainHtml(correct) : splitExplainHtml(correct);
+  showExplain(ok, html, newQuestion);
 }
 
 // ─── 解説 ─────────────────────────────
+// 出題では翻数を伏せているので、答え合わせで「どの役で何翻だったか」を必ず見せる
+function yakuExplainHtml() {
+  const q = S.q;
+  if (!q.yakuList || !q.yakuList.length) return '';
+  const rows = q.yakuList.map(y => `<tr><td>${y.name}</td><td>${y.han}翻</td></tr>`).join('');
+  return `<p>役の内訳:</p>
+    <table class="drill-fu-table">${rows}
+      <tr><td>合計</td><td>${q.calc.han}翻</td></tr></table>`;
+}
 function fuExplainHtml() {
   const q = S.q;
   const rows = q.fuRes.breakdown.map(b => `<tr><td>${b.label}</td><td>${b.fu >= 0 ? '+' : ''}${b.fu}符</td></tr>`).join('');
@@ -466,7 +566,7 @@ function scoreExplainHtml(correct) {
   if (!c.isTsumo) html += `<br>ロンは 基本点${mul} = ${correct.total.toLocaleString()}点 (100点単位に切り上げ)`;
   else html += `<br>${correct.text}`;
   html += '</div>';
-  if (S.q.kind === 'tehai') html += fuExplainHtml();
+  if (S.q.kind === 'tehai') html += yakuExplainHtml() + fuExplainHtml();
   return html;
 }
 function splitExplainHtml(correct) {
@@ -553,6 +653,7 @@ document.addEventListener('DOMContentLoaded', () => {
     b.addEventListener('click', () => startMode(b.dataset.mode)));
   $('drill-quit').addEventListener('click', showMenu);
   $('drill-next').addEventListener('click', closeExplain);
+  $('drill-reveal-btn').addEventListener('click', revealAnswers);
   $('drill-reset').addEventListener('click', () => {
     if (!confirm('これまでの成績を消します。よろしいですか?')) return;
     S.stats = emptyStats(); saveStats(); renderStats();
@@ -566,6 +667,10 @@ document.addEventListener('DOMContentLoaded', () => {
       else location.href = 'index.html';
     } else if (e.key === 'Enter' && !$('drill-explain').hidden) {
       e.preventDefault(); closeExplain();
+    } else if (!$('drill-quiz').hidden && $('drill-explain').hidden && !S.revealed
+               && (e.key === 'Enter' || e.key === ' ')) {
+      // 選択肢を隠している間は Enter / Space で開く
+      e.preventDefault(); revealAnswers();
     } else if (!$('drill-quiz').hidden && $('drill-explain').hidden && /^[1-4]$/.test(e.key)) {
       // 1〜4 キーで選択肢を選べる
       const btns = document.querySelectorAll('.drill-ans');

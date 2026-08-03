@@ -130,6 +130,20 @@
 .drill-cond b { color: #ffeb3b; }
 .drill-ask { font-size: 15px; font-weight: 700; margin: 0; text-align: center; color: #aee5c8; }
 
+/* 選択肢を隠している間のボタン (頭の中で計算する時間を作る) */
+.drill-reveal { text-align: center; }
+.drill-reveal__btn {
+  min-height: 56px; width: 100%; padding: 8px 16px;
+  background: rgba(255, 235, 59, 0.14);
+  border: 2px dashed rgba(255, 235, 59, 0.5); border-radius: 12px;
+  color: #ffeb3b; font-size: 16px; font-weight: 700; cursor: pointer;
+  font-family: inherit;
+}
+.drill-reveal__btn:hover, .drill-reveal__btn:focus-visible {
+  background: rgba(255, 235, 59, 0.24); border-style: solid;
+}
+.drill-reveal__hint { margin: 8px 0 0; font-size: 12px; color: #9ab; }
+
 .drill-answers { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .drill-ans {
   min-height: 56px; padding: 8px 6px;

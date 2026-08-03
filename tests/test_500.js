@@ -12,8 +12,12 @@
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
-const { check, summary } = require('./harness');
+const { check, summary, makeGame } = require('./harness');
 const SC = require('../score.js');
+
+// ドリルは翻数を対局側の calcYaku で判定する (出題で翻数を伏せるため)。
+// 本番と同じ経路で回すために 対局エンジンをそのまま渡す
+const ENGINE = makeGame();
 
 // ─── 早見表 (画像の数値をそのまま転記) ──────────────
 // 1〜4翻。5翻以上は下の LIMIT 表を使う
@@ -146,12 +150,14 @@ function loadDrill() {
     document: doc, location: { href: '' },
     localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
     ScoreCalc: SC,
+    calcYaku: ENGINE.calcYaku,
+    TILE_IMG: ENGINE.TILE_IMG,
   };
   ctx.window = ctx;
   vm.createContext(ctx);
   const src = fs.readFileSync(path.join(__dirname, '..', 'drill.js'), 'utf8');
   return vm.runInContext(src + `
-;({ newQuestion, genTehai, scoreChoices, splitChoices, fuChoices, S })`, ctx, { filename: 'drill.js' });
+;({ newQuestion, genTehai, scoreChoices, splitChoices, judgeHand, S })`, ctx, { filename: 'drill.js' });
 }
 
 (async () => {
@@ -185,30 +191,39 @@ function loadDrill() {
     if (c.isTsumo && exp.each !== undefined && got.detail.fromKo !== exp.each) {
       bad.split.push(`#${i} ${c.fu}符${c.han}翻 親ツモ → 期待${exp.each}オール≠${got.detail.fromKo}`);
     }
-    // ③ 選択肢: 正解を含み4択か + その手であり得ない符を混ぜていないか
-    const fch = D.fuChoices(c.fu, q.hand);
-    if (!fch.includes(c.fu) || fch.length !== 4) bad.choice.push(`#${i} 符の選択肢`);
-    if (!q.hand.isChiitoi && fch.includes(25)) bad.choice.push(`#${i} 面子手なのに25符(七対子)が選択肢に`);
-    if (!(q.hand.isPinfu && q.hand.isTsumo) && fch.includes(20)) {
-      bad.choice.push(`#${i} 平和ツモでないのに20符が選択肢に`);
+    // ③ 選択肢: 正解を含み4択か (ツモは「2600オール」「1300・2600」の支払い形式で答える)
+    if (c.isTsumo) {
+      const spch = D.splitChoices(q, got);
+      if (spch.length !== 4 || spch.filter(x => x.correct).length !== 1) {
+        bad.choice.push(`#${i} ツモの支払い選択肢 (${spch.length}択 / 正解${spch.filter(x => x.correct).length}個)`);
+      }
+    } else {
+      const sch = D.scoreChoices(q, got.total);
+      if (!sch.includes(got.total) || sch.length !== 4) bad.choice.push(`#${i} 点数の選択肢`);
     }
-    const sch = D.scoreChoices(q, got.total);
-    if (!sch.includes(got.total) || sch.length !== 4) bad.choice.push(`#${i} 点数の選択肢`);
+    // ③-2 出題では翻数を伏せるので、役の内訳が翻数の唯一の根拠になる。合計が合っているか
+    {
+      const sum = (q.yakuList || []).reduce((n, y) => n + y.han, 0);
+      if (!q.yakuList || !q.yakuList.length) bad.combo.push(`#${i} 役の内訳が空 (役なしの手)`);
+      else if (sum !== c.han) bad.combo.push(`#${i} 役内訳の合計${sum}≠翻数${c.han}`);
+    }
     // ④ 成立しない組み合わせを出していないか
     if ((c.fu === 20 || c.fu === 25) && c.han < 2) bad.combo.push(`#${i} ${c.fu}符${c.han}翻`);
     if (c.fu === 20 && !(q.hand.isPinfu && q.hand.isTsumo)) bad.combo.push(`#${i} 20符なのに平和ツモでない`);
-    // 手の形から確実につく役に対して翻数が足りていないか (三暗刻なのに1翻 等)
+    // 役満の形を出していないか (符も翻も関係ない固定点になり 点数計算の練習にならない)
+    // ⚠️ 「暗刻3つなら必ず三暗刻」のような形からの決め打ち検証はできない。
+    //    333/444/555 は 345×3 とも分解でき、calcYaku は高点法で高い解釈を選ぶため
+    //    三暗刻が消えることが正しくある。 翻数の正しさは
+    //    「役内訳の合計 == 翻数」(上) と test_drill.js の突き合わせで担保する。
     {
-      const ns = q.hand.melds.filter(m => m.type !== 'shuntsu');
-      const cc = ns.filter(m => !m.open);
-      const kc = q.hand.melds.filter(m => m.type === 'kantsu').length;
-      let need = 1;
-      if (ns.length === 4) need += 2;
-      if (cc.length >= 3) need += 2;
-      if (kc >= 3) need += 2;
-      if (q.hand.isPinfu && q.hand.isTsumo) need = Math.max(need, 2);
-      if (c.han < need) bad.combo.push(`#${i} ${c.han}翻だが形から最低${need}翻 (刻子${ns.length}/暗刻${cc.length}/槓${kc})`);
+      const ns = q.hand.melds.map((m, idx) => ({ m, idx })).filter(x => x.m.type !== 'shuntsu');
+      // ロンで完成した刻子は明刻として数える (シャンポンロンで暗刻が1つ減る)
+      const cc = ns.filter(x => !x.m.open && !(!q.hand.isTsumo && x.idx === q.hand.ronMeldIdx));
       if (cc.length >= 4) bad.combo.push(`#${i} 暗刻が4つ (四暗刻の形)`);
+      const names = (q.yakuList || []).map(y => y.name).join(',');
+      if (/役満|四暗刻|大三元|国士|清老頭|緑一色|四槓子|字一色|四喜/.test(names)) {
+        bad.combo.push(`#${i} 役満が出題された (${names})`);
+      }
     }
   }
 

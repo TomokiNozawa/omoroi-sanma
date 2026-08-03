@@ -4,8 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>点数計算ドリル — おもろい三麻</title>
-  <link rel="stylesheet" href="style.css?v=0.9.12">
-  <link rel="stylesheet" href="drill.css?v=0.9.12">
+  <link rel="stylesheet" href="style.css?v=0.9.13">
+  <link rel="stylesheet" href="drill.css?v=0.9.13">
   <link rel="manifest" href="manifest.json">
   <meta name="theme-color" content="#0d5c3a">
 </head>
@@ -34,7 +34,7 @@
           <span class="drill-mode__icon">🀇</span>
           <span class="drill-mode__body">
             <b>手牌から点数を出す</b>
-            <small>あがり手牌を見て、符を数えて点数を答える。実戦に一番近い</small>
+            <small>状況と手牌だけを見て点数を答える。翻も符も自分で数える、実戦と同じ形式</small>
           </span>
         </button>
         <button class="drill-mode" data-mode="table">
@@ -75,6 +75,12 @@
       <p class="drill-ask" id="drill-ask"></p>
     </div>
 
+    <!-- 選択肢は最初は隠す。頭の中で計算してから自分のタイミングで開く -->
+    <div class="drill-reveal" id="drill-reveal" hidden>
+      <button class="drill-reveal__btn" id="drill-reveal-btn">選択肢を見る</button>
+      <p class="drill-reveal__hint">頭の中で計算できたら押してください</p>
+    </div>
+
     <div class="drill-answers" id="drill-answers"></div>
 
     <div class="drill-q-foot">
@@ -91,7 +97,9 @@
     </div>
   </div>
 
-  <script src="score.js?v=0.9.12"></script>
-  <script src="drill.js?v=0.9.12"></script>
+  <script src="score.js?v=0.9.13"></script>
+  <!-- 役判定 (calcYaku) を対局と共用する。#table が無いので対局の初期化は走らない -->
+  <script src="script.js?v=0.9.13"></script>
+  <script src="drill.js?v=0.9.13"></script>
 </body>
 </html>

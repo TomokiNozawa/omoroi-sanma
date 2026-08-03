@@ -229,7 +229,7 @@ function makeGame() {
   vm.createContext(ctx);
   const code = readSrc('script.js') + `
 ;({ G, calcYaku, isWinning, countTiles, sortHand, shantenOf, isTenpai13,
-    TILE_NAMES, YAOCHU_IDS, RED_DORA_IDS, KITA_ID, ALL_SEATS,
+    TILE_NAMES, TILE_IMG, YAOCHU_IDS, RED_DORA_IDS, KITA_ID, ALL_SEATS,
     meldExtraTiles, openMeldIds, meldTriples, equivHand, seatWindOf,
     countYaochuKinds: (typeof countYaochuKinds === 'function' ? countYaochuKinds : null),
     canKyuushu: (typeof canKyuushu === 'function' ? canKyuushu : null),
