@@ -469,19 +469,25 @@ function enumerateDecomps(hand) {
   return out;
 }
 
-// 役牌になる id (雀頭がこれだと ピンフ不成立): 三元牌 + 場風牌 + 自風牌
-// ⚠️ 自風を見落とすと、自風が南/西の子が その風牌を雀頭にした時に
-//    本来は役牌 (ピンフ不成立) なのに ピンフが付いてしまう。
-//    また 東を無条件に役牌にすると、南場で場風でも自風でもない東を
-//    役牌と誤判定する。 判定基準は countYakuhai (刻子の役牌) と必ず揃えること
+// ─── 役牌の基準 (ここだけで判定する) ────────────────
+// 役牌 = 三元牌 + 場風牌 + 自風牌。
+// ⚠️ 同じ判断を あちこちで書くと必ずズレる (実際に 雀頭側だけ自風を見落とし、
+//    自風が南/西の子に ピンフが誤って付くバグが出た)。
+//    場風・自風の判定は 必ずこの2つを通すこと。
+// 場風牌の id: 東場=東(20) / 南場=南(21)
+function roundWindId(round) {
+  return String(round || '').startsWith('南') ? 21 : 20;
+}
+// 自風牌の id: 東=20 / 南=21 / 西=22 (seatWind 未指定の旧呼び出しは 親=東 とみなす)
+function seatWindIdOf(context) {
+  return { '東': 20, '南': 21, '西': 22 }[context.seatWind || (context.isOya ? '東' : null)];
+}
+
+// 雀頭が役牌か (これに当たると ピンフ不成立)
 function isYakuhaiPairId(id, context) {
   if (id === 24 || id === 25 || id === 26) return true;   // 白發中
-  // 場風: 東場=東(20) / 南場=南(21)
-  const roundId = (context.round && context.round.startsWith('南')) ? 21 : 20;
-  if (id === roundId) return true;
-  // 自風: 東=20 / 南=21 / 西=22 (seatWind 未指定の旧呼び出しは 親=東 とみなす)
-  const swId = { '東': 20, '南': 21, '西': 22 }[context.seatWind || (context.isOya ? '東' : null)];
-  return swId != null && id === swId;
+  if (id === roundWindId(context.round)) return true;     // 場風
+  return id === seatWindIdOf(context);                    // 自風
 }
 
 // ピンフ: 全順子 + 雀頭が役牌以外 + 和了牌が両面待ち
@@ -711,17 +717,15 @@ function countYakuhai(hand, context) {
       yakus.push({ name: TILE_NAMES[id], han: 1 });
     }
   }
-  // 場風: 東場=東 (id=20)、 南場=南 (id=21)
-  if ((counts[20] || 0) >= 3 && context.round && context.round.startsWith('東')) {
-    yakus.push({ name: '場風 東', han: 1 });
+  // 場風 (判定は roundWindId に集約。 東場=東 / 南場=南)
+  const rwId = roundWindId(context.round);
+  if ((counts[rwId] || 0) >= 3) {
+    yakus.push({ name: `場風 ${rwId === 21 ? '南' : '東'}`, han: 1 });
   }
-  if ((counts[21] || 0) >= 3 && context.round && context.round.startsWith('南')) {
-    yakus.push({ name: '場風 南', han: 1 });
-  }
-  // 自風: 東=20 / 南=21 / 西=22 (seatWind 未指定の旧呼び出しは 親=東 のみ)
+  // 自風 (判定は seatWindIdOf に集約)。 連風牌は 場風+自風 で2翻になる
   const sw = context.seatWind || (context.isOya ? '東' : null);
-  const swId = { '東': 20, '南': 21, '西': 22 }[sw];
-  if (swId && (counts[swId] || 0) >= 3) {
+  const swId = seatWindIdOf(context);
+  if (swId != null && (counts[swId] || 0) >= 3) {
     yakus.push({ name: `自風 ${sw}`, han: 1 });
   }
   return yakus;
@@ -857,13 +861,18 @@ function calcYaku(hand, context) {
     if (isSanshokuDoukou(decomps)) { yakuList.push({ name: '三色同刻', han: 2 }); han += 2; }
     // 三暗刻: 暗刻3つ (ポン/明槓は除外)。 ロンの場合 ロン牌で完成した刻子は明刻扱いのため、
     // 「ロン牌を除いた13枚の時点で完成していた刻子」 だけを暗刻として数える (実ルール準拠)
+    // 鳴いた「刻子」の数。 openIds は 1面子=1id で入る想定だが、
+    // チー (順子の鳴き) の id が混ざっても暗刻数から引かないよう、
+    // 手牌に3枚以上ある id だけを刻子として数える
+    const cntForOpen = countTiles(hand);
+    const openKoutsuCount = openIds.filter(id => (cntForOpen[id] || 0) >= 3).length;
     let ankoCount;
     if (context.isTsumo || !context.winTile) {
-      ankoCount = countAnkoCount(hand) - openIds.length;
+      ankoCount = countAnkoCount(hand) - openKoutsuCount;
     } else {
       const c13 = countTiles(hand);
       c13[context.winTile.id] = (c13[context.winTile.id] || 0) - 1;
-      ankoCount = Object.keys(c13).filter(id => c13[id] >= 3).length - openIds.length;
+      ankoCount = Object.keys(c13).filter(id => c13[id] >= 3).length - openKoutsuCount;
     }
     if (ankoCount >= 3) { yakuList.push({ name: '三暗刻', han: 2 }); han += 2; }
     // ピンフ (全順子 + 雀頭非役牌 + 両面待ち)
@@ -2821,9 +2830,10 @@ function checkCallsAfterDiscard(fromSeat, tile) {
       NETQ().offerCall(seat, fromSeat, tile, canKan);
       return true;
     }
-    // CPU: 役牌 (三元牌/場風東/自風) のみ 60% でポン。 3枚持ちなら 50% で明槓 (カンドラ+嶺上)
-    const swId = { '東': 20, '南': 21, '西': 22 }[seatWindOf(seat)];
-    if ([24, 25, 26, 20, swId].includes(tile.id) && Math.random() < 0.6) {
+    // CPU: 役牌 (三元牌/場風/自風) のみ 60% でポン。 3枚持ちなら 50% で明槓 (カンドラ+嶺上)
+    // 場風は東固定ではない (南場は南)。 判定は役判定と同じヘルパーを通す
+    const swId = seatWindIdOf({ seatWind: seatWindOf(seat) });
+    if ([24, 25, 26, roundWindId(G.round), swId].includes(tile.id) && Math.random() < 0.6) {
       const useKan = canKan && Math.random() < 0.5;
       G.busy = true;
       G.pendingCall = { fromSeat, tile, cpu: true };

@@ -223,6 +223,40 @@ const D = loadDrill();
       `リーチ${sawRiichi}回 / ドラ${sawDora}回`);
   }
 
+  console.log('\n── 鳴いた面子の渡し方 (四麻のチー) ──────────────');
+  {
+    // calcYaku の openMeldIds は「1面子 = 1 id」(対局側 openMeldIds() は
+    // ポン/明槓/加槓を .map(m => m.id) で返す)。 三暗刻は
+    // 「暗刻の数 - openMeldIds.length」で数えるので、
+    // チーで id を3つ渡すと 暗刻が3つ余計に引かれて 三暗刻が消える。
+    const hand = {
+      melds: [
+        { type: 'koutsu', id: 3, open: false },    // 2p 暗刻
+        { type: 'koutsu', id: 6, open: false },    // 5p 暗刻
+        { type: 'koutsu', id: 12, open: false },   // 2s 暗刻
+        { type: 'shuntsu', id: 15, open: true },   // 5s6s7s チー
+      ],
+      pair: 20, wait: 'tanki', isTsumo: true, isMenzen: false,
+      seatWind: '南', roundWind: '東', isChiitoi: false, isPinfu: false, ronMeldIdx: -1,
+    };
+    const inp = D.toYakuInput(hand);
+    check('チーは openMeldIds に 1面子=1件で入る', inp.context.openMeldIds.length === 1,
+      `${inp.context.openMeldIds.length}件: [${inp.context.openMeldIds}]`);
+    const res = ENGINE.calcYaku(inp.tiles, inp.context);
+    const names = (res.yakuList || []).map(y => y.name);
+    check('暗刻3つ + チー1つ で 三暗刻が付く', names.includes('三暗刻'), names.join('/'));
+    check('チーがあるので門前役は付かない',
+      !names.includes('門前清自摸和'), names.join('/'));
+
+    // ポン (刻子の鳴き) は従来どおり 暗刻から除かれる
+    const hand2 = JSON.parse(JSON.stringify(hand));
+    hand2.melds[0].open = true;                    // 2p をポンに
+    const res2 = ENGINE.calcYaku(D.toYakuInput(hand2).tiles, D.toYakuInput(hand2).context);
+    const names2 = (res2.yakuList || []).map(y => y.name);
+    check('ポンした刻子は暗刻に数えない (暗刻2つでは三暗刻なし)',
+      !names2.includes('三暗刻'), names2.join('/'));
+  }
+
   console.log('\n── script.js と同じスコープで読める (識別子の衝突なし) ─────');
   {
     // drill.html は script.js と drill.js を同じグローバルスコープで読む。

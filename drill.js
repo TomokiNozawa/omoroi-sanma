@@ -187,7 +187,11 @@ function toYakuInput(hand) {
   for (const m of hand.melds) {
     if (m.type === 'shuntsu') {
       tiles.push({ id: m.id }, { id: m.id + 1 }, { id: m.id + 2 });
-      if (m.open) openMeldIds.push(m.id, m.id + 1, m.id + 2);
+      // ⚠️ openMeldIds は「1面子 = 1 id」。対局側の openMeldIds() が
+      //    ポン/明槓/加槓を .map(m => m.id) で返す形に合わせる。
+      //    3枚分入れると calcYaku の三暗刻 (暗刻数 - openMeldIds.length) が
+      //    余計に引かれて 三暗刻が消える
+      if (m.open) openMeldIds.push(m.id);
     } else {
       tiles.push({ id: m.id }, { id: m.id }, { id: m.id });
       if (m.type === 'kantsu') extraTiles.push({ id: m.id });

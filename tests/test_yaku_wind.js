@@ -101,5 +101,30 @@ const koutsuCtx = (o) => ctx(Object.assign({ winTile: T(3) }, o));
       bad ? detail.join(' | ') : `${cases.length}ケース 一致`);
   }
 
+  console.log('\n── 場風・自風の判定が1箇所に集約されている ──────────');
+  {
+    // 同じ判断が複数箇所に散ると必ずズレる (雀頭側だけ自風を見落としていた実例あり)。
+    // 場風/自風の判定は roundWindId / seatWindIdOf を通すこと。
+    const fs = require('fs');
+    const path = require('path');
+    const src = fs.readFileSync(path.join(__dirname, '..', 'script.js'), 'utf8');
+    // ヘルパー自身の定義以外に、風牌 id を直書きしたテーブルが残っていないか
+    const table = /\{\s*'東':\s*20,\s*'南':\s*21,\s*'西':\s*22\s*\}/g;
+    const hits = src.match(table) || [];
+    check('自風の id テーブルは seatWindIdOf の中だけ', hits.length === 1,
+      `${hits.length}箇所 (1箇所=ヘルパー定義のみ)`);
+
+    // 「東を場風と決め打つ」書き方が残っていないか
+    const eastHardcode = /startsWith\('東'\)/g;
+    check('場風を東と決め打つ判定が残っていない', (src.match(eastHardcode) || []).length === 0,
+      `${(src.match(eastHardcode) || []).length}箇所`);
+
+    const roundHits = (src.match(/startsWith\('南'\)/g) || []).length;
+    check('場風の判定は roundWindId の中だけ', roundHits === 1, `${roundHits}箇所`);
+
+    check('ヘルパーが両方定義されている',
+      /function roundWindId/.test(src) && /function seatWindIdOf/.test(src));
+  }
+
   summary('風牌の役牌判定 (ピンフの雀頭 / 刻子)');
 })();
