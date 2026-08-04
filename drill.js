@@ -133,11 +133,14 @@ function genTehai(players) {
     if (!base) continue;
     if (base.isYakuman) continue;
     if (base.isPinfu !== t.hand.isPinfu) continue;
+    // base.han には 手役 + 赤ドラ (5筒・5索は全て赤) が入っている。
+    // 赤が多い手は ここで 5翻を超えて弾かれる = 符が効く手だけが残る
     if (base.han < 1 || base.han > 4) continue;
 
-    // リーチ (門前のみ) と ドラ を 合計5翻以内で足す。
-    // 状況文に「リーチ / ドラN」を出すので、手役と合わせて翻数が確定する
+    // リーチ (門前のみ) と 表ドラ を 合計5翻以内で足す。
+    // 状況文に「リーチ / 表ドラN」を出すので、手役+赤ドラと合わせて翻数が確定する
     let han = base.han;
+    const aka = countAka(t.hand);
     const yakuList = base.yakuList.slice();
     let isRiichi = false;
     if (t.hand.isMenzen && han < 4 && Math.random() < 0.45) {
@@ -145,7 +148,9 @@ function genTehai(players) {
       han += 1;
       yakuList.push({ name: 'リーチ', han: 1 });
     }
-    const doraRoom = Math.max(0, 5 - han);
+    // ドラ系 (赤 + 表) は合計2枚まで。 赤が乗った分だけ表ドラを減らさないと
+    // 満貫 (符が効かない = 符計算の練習にならない) ばかりになる
+    const doraRoom = Math.max(0, Math.min(5 - han, 2 - aka));
     const doraCand = [0, 0, 1, 1, 2].filter(v => v <= doraRoom);
     const doraCount = doraCand.length ? pick(doraCand) : 0;
     if (doraCount > 0) {
@@ -153,22 +158,32 @@ function genTehai(players) {
       yakuList.push({ name: `ドラ${doraCount}`, han: doraCount });
     }
     t.hand.isRiichi = isRiichi;
-    const out = { hand: t.hand, han, yakuList, isOya: t.isOya, players, isRiichi, doraCount };
+    const out = { hand: t.hand, han, yakuList, isOya: t.isOya, players, isRiichi, doraCount,
+      akaCount: aka };
     if (!fallback) fallback = out;
     return out;
   }
   // 引き直しが尽きた場合の保険 (必ず役が付く形: 全順子+数牌雀頭+両面 = ピンフ)
+  // ⚠️ 赤ドラ (5筒=id6 / 5索=id15) を含まない面子で組む。
+  //    含めると翻数が変わるのに ここの yakuList は固定なので食い違う
   return fallback || {
     hand: {
-      melds: [{ type: 'shuntsu', id: 2 }, { type: 'shuntsu', id: 5 },
-        { type: 'shuntsu', id: 11 }, { type: 'shuntsu', id: 14 }],
-      pair: 8, wait: 'ryanmen', isTsumo: false, isMenzen: true,
+      melds: [{ type: 'shuntsu', id: 2 }, { type: 'shuntsu', id: 7 },
+        { type: 'shuntsu', id: 11 }, { type: 'shuntsu', id: 16 }],
+      pair: 10, wait: 'ryanmen', isTsumo: false, isMenzen: true,
       seatWind: '南', roundWind: '東', isChiitoi: false, isPinfu: true,
       ronMeldIdx: -1, isRiichi: false,
     },
     han: 1, yakuList: [{ name: 'ピンフ', han: 1 }],
-    isOya: false, players, isRiichi: false, doraCount: 0,
+    isOya: false, players, isRiichi: false, doraCount: 0, akaCount: 0,
   };
+}
+
+// 手牌に入っている赤ドラの枚数。
+// このアプリは「全赤」ルールで 5筒・5索は すべて赤ドラ (1枚1翻)。
+// 判定は対局側の RED_DORA_IDS を使う (ここで id を書くと二重管理になる)
+function countAka(hand) {
+  return handTiles(hand).filter(id => RED_DORA_IDS.has(id)).length;
 }
 
 // ─── 役の判定 (対局と同じ calcYaku を使う) ──────────────
@@ -180,25 +195,28 @@ function genTehai(players) {
 
 // 面子構造 → calcYaku の入力 { tiles(14枚), context }
 // 槓は 3枚等価 + 4枚目を extraTiles に入れる (calcYaku がその枚数でカン数を数える)
+// ⚠️ 牌には isRed を必ず載せる。5筒・5索は このアプリでは全て赤ドラ (1枚1翻) で、
+//    落とすと 対局では付く赤ドラ分の翻がドリルだけ消えて「正解が選択肢に無い」状態になる
 function toYakuInput(hand) {
   const tiles = [];
   const extraTiles = [];
   const openMeldIds = [];
+  const T = (id) => ({ id, isRed: RED_DORA_IDS.has(id) });
   for (const m of hand.melds) {
     if (m.type === 'shuntsu') {
-      tiles.push({ id: m.id }, { id: m.id + 1 }, { id: m.id + 2 });
+      tiles.push(T(m.id), T(m.id + 1), T(m.id + 2));
       // ⚠️ openMeldIds は「1面子 = 1 id」。対局側の openMeldIds() が
       //    ポン/明槓/加槓を .map(m => m.id) で返す形に合わせる。
       //    3枚分入れると calcYaku の三暗刻 (暗刻数 - openMeldIds.length) が
       //    余計に引かれて 三暗刻が消える
       if (m.open) openMeldIds.push(m.id);
     } else {
-      tiles.push({ id: m.id }, { id: m.id }, { id: m.id });
-      if (m.type === 'kantsu') extraTiles.push({ id: m.id });
+      tiles.push(T(m.id), T(m.id), T(m.id));
+      if (m.type === 'kantsu') extraTiles.push(T(m.id));
       if (m.open) openMeldIds.push(m.id);
     }
   }
-  tiles.push({ id: hand.pair }, { id: hand.pair });
+  tiles.push(T(hand.pair), T(hand.pair));
   // あがり牌 (シャンポンの明刻化・ピンフの両面判定に使う)
   const wp = winTilePos(hand);
   const groups = handGroups(hand);
@@ -320,7 +338,7 @@ function newQuestion() {
     const fuRes = ScoreCalc.calcFu(t.hand);
     S.q = {
       kind: 'tehai', hand: t.hand, fuRes, yakuList: t.yakuList,
-      isRiichi: t.isRiichi, doraCount: t.doraCount,
+      isRiichi: t.isRiichi, doraCount: t.doraCount, akaCount: t.akaCount,
       calc: { fu: fuRes.fu, han: t.han, isOya: t.isOya, isTsumo: t.hand.isTsumo, players: S.players },
     };
   } else if (S.mode === 'table') {
@@ -359,9 +377,11 @@ function condText(q) {
     const waitName = { ryanmen: '両面待ち', shanpon: 'シャンポン待ち', kanchan: '嵌張待ち',
       penchan: '辺張待ち', tanki: '単騎待ち' }[h.wait];
     // 翻数と符は出さない (手牌と状況だけを見て点数まで出す形式)。
-    // 場風・自風は 役牌と符の判定に必要 / リーチとドラは翻数に効くので必ず出す
+    // 場風・自風は 役牌と符の判定に必要 / リーチと表ドラは翻数に効くので必ず出す。
+    // ⚠️ 赤ドラは手牌を見れば判る (5筒・5索は全て赤) ので ここでは枚数を出さず、
+    //    牌を赤枠で示して自分で数えてもらう
     const riichi = q.isRiichi ? ' / <b>リーチ</b>' : '';
-    const dora = q.doraCount > 0 ? ` / <b>ドラ ${q.doraCount}</b>` : ' / ドラなし';
+    const dora = q.doraCount > 0 ? ` / <b>表ドラ ${q.doraCount}</b>` : ' / 表ドラなし';
     return `${rule} / <b>${h.roundWind}場</b>・自風<b>${h.seatWind}</b> / ${who} / ${how}<br>`
       + `${menzen} / ${waitName}${riichi}${dora}`;
   }
@@ -388,13 +408,23 @@ function renderQuestion() {
       const cls = 'drill-hand__grp'
         + (g.open ? ' drill-hand__grp--open' : '')
         + (g.pair ? ' drill-hand__grp--pair' : '');
-      const tiles = g.ids.map((id, ti) =>
-        tileImgHtml(id, (wp && wp.g === gi && wp.t === ti) ? 'drill-hand__win' : '')).join('');
+      const tiles = g.ids.map((id, ti) => {
+        // あがり牌 (オレンジ枠) と 赤ドラ (赤枠) は 同じ牌で重なることがあるので両方付ける
+        const tcls = [
+          (wp && wp.g === gi && wp.t === ti) ? 'drill-hand__win' : '',
+          RED_DORA_IDS.has(id) ? 'drill-hand__aka' : '',
+        ].filter(Boolean).join(' ');
+        return tileImgHtml(id, tcls);
+      }).join('');
       return `<span class="${cls}" data-label="${g.label || ''}">${tiles}</span>`;
     }).join('');
     // 凡例 (何を見て符を数えるかが判るように)
     const parts = ['<span class="drill-lg drill-lg--win">□</span> あがり牌'];
     if (groups.some(g => g.open)) parts.push('<span class="drill-lg drill-lg--open">□</span> 鳴いた面子 (明刻/明槓)');
+    // 赤ドラは翻数に直結するので 手牌に有る時は必ず凡例を出す (5筒・5索は全て赤)
+    if (groups.some(g => g.ids.some(id => RED_DORA_IDS.has(id)))) {
+      parts.push('<span class="drill-lg drill-lg--aka">□</span> 赤ドラ (5筒・5索は全て赤 = 1枚1翻)');
+    }
     if (q.hand.wait === 'shanpon' && !q.hand.isTsumo) {
       parts.push('<span class="drill-note-inline">※ロンで完成した刻子は明刻</span>');
     }

@@ -152,6 +152,7 @@ function loadDrill() {
     ScoreCalc: SC,
     calcYaku: ENGINE.calcYaku,
     TILE_IMG: ENGINE.TILE_IMG,
+    RED_DORA_IDS: ENGINE.RED_DORA_IDS,   // 赤ドラ (5筒/5索)。 対局側の定義をそのまま使う
   };
   ctx.window = ctx;
   vm.createContext(ctx);

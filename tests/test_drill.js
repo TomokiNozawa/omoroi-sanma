@@ -37,13 +37,14 @@ function loadDrill() {
     ScoreCalc: SC,
     calcYaku: ENGINE.calcYaku,
     TILE_IMG: ENGINE.TILE_IMG,
+    RED_DORA_IDS: ENGINE.RED_DORA_IDS,   // 赤ドラ (5筒/5索) の id。 対局側の定義をそのまま使う
   };
   ctx.window = ctx;
   vm.createContext(ctx);
   const src = fs.readFileSync(path.join(__dirname, '..', 'drill.js'), 'utf8');
   return vm.runInContext(src + `
 ;({ genTehai, handTiles, scoreChoices, splitChoices, judgeHand, toYakuInput,
-    S, TILE_IMG, SHUNTSU_STARTS })`,
+    countAka, S, TILE_IMG, SHUNTSU_STARTS, RED_DORA_IDS })`,
     ctx, { filename: 'drill.js' });
 }
 
@@ -221,6 +222,56 @@ const D = loadDrill();
     check('ドラは0〜2枚', doraTooMany === 0, `範囲外=${doraTooMany}件`);
     check('リーチもドラも実際に出題される', sawRiichi > 0 && sawDora > 0,
       `リーチ${sawRiichi}回 / ドラ${sawDora}回`);
+  }
+
+  console.log('\n── 赤ドラ (5筒・5索は全て赤) ────────────────');
+  {
+    // このアプリは全赤ルール (RED_DORA_IDS = 5筒/5索)。 対局では 1枚1翻 付くので、
+    // ドリルで数え落とすと「正解が選択肢に無い」= 正しく計算した人が不正解になる。
+    // 出題側は自前で足さず calcYaku に isRed を渡して数えさせる (対局と同じ経路)。
+    const hand = {
+      melds: [
+        { type: 'koutsu', id: 6, open: false },    // 5筒 暗刻 = 赤3枚
+        { type: 'shuntsu', id: 11, open: false },  // 1s2s3s
+        { type: 'shuntsu', id: 16, open: false },  // 6s7s8s
+        { type: 'koutsu', id: 24, open: false },   // 白 (役)
+      ],
+      pair: 20, wait: 'tanki', isTsumo: true, isMenzen: true,
+      seatWind: '南', roundWind: '東', isChiitoi: false, isPinfu: false, ronMeldIdx: -1,
+    };
+    const inp = D.toYakuInput(hand);
+    const reds = inp.tiles.filter(t => t.isRed).length;
+    check('toYakuInput が赤ドラに isRed を立てる', reds === 3, `${reds}枚`);
+    const res = ENGINE.calcYaku(inp.tiles, inp.context);
+    const aka = (res.yakuList || []).find(y => y.name === '赤ドラ');
+    check('5筒の暗刻で 赤ドラ3翻が付く', !!aka && aka.han === 3, aka ? `${aka.han}翻` : 'なし');
+
+    // 槓の4枚目 (extraTiles) も赤ドラに数える
+    const kanHand = Object.assign({}, hand, {
+      melds: [{ type: 'kantsu', id: 15, open: false },   // 5索 暗槓 = 赤4枚
+        { type: 'shuntsu', id: 2, open: false }, { type: 'shuntsu', id: 7, open: false },
+        { type: 'koutsu', id: 24, open: false }],
+    });
+    const kanInp = D.toYakuInput(kanHand);
+    const kanRes = ENGINE.calcYaku(kanInp.tiles, kanInp.context);
+    const kanAka = (kanRes.yakuList || []).find(y => y.name === '赤ドラ');
+    check('暗槓の4枚目も赤ドラに数える (5索カン = 赤4翻)', !!kanAka && kanAka.han === 4,
+      kanAka ? `${kanAka.han}翻` : 'なし');
+
+    // 実際の出題でも 手牌の赤枚数と 役内訳の赤ドラ翻が一致するか
+    let akaBad = 0, sawAka = 0, akaCountBad = 0, badCase = null;
+    for (let i = 0; i < 1000; i++) {
+      const t = D.genTehai(i % 2 ? 3 : 4);
+      const inHand = D.handTiles(t.hand).filter(id => D.RED_DORA_IDS.has(id)).length;
+      const listed = (t.yakuList.find(y => y.name === '赤ドラ') || { han: 0 }).han;
+      if (inHand !== listed) { akaBad++; if (!badCase) badCase = `手牌${inHand}枚 vs 役${listed}翻`; }
+      if (t.akaCount !== inHand) akaCountBad++;
+      if (inHand > 0) sawAka++;
+    }
+    check('手牌の赤ドラ枚数と 役の赤ドラ翻が一致する', akaBad === 0,
+      akaBad ? `不一致=${akaBad}件 (例: ${badCase})` : '1000問すべて一致');
+    check('出題の akaCount が実際の枚数と一致する', akaCountBad === 0, `不一致=${akaCountBad}件`);
+    check('赤ドラ入りの手が実際に出題される', sawAka > 0, `${sawAka}/1000問`);
   }
 
   console.log('\n── 鳴いた面子の渡し方 (四麻のチー) ──────────────');

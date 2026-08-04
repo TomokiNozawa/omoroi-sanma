@@ -118,6 +118,9 @@
 .drill-hand__grp--open::after { color: #ffb74d; }
 /* あがり牌 (シャンポン待ちのロンだと この刻子が明刻になる) */
 .drill-hand .drill-hand__win { outline: 2px solid #ff5722; outline-offset: 1px; border-radius: 3px; }
+/* 赤ドラ (5筒・5索は全て赤 = 1枚1翻)。 牌画像に赤の別絵が無いので枠で示す。
+   あがり牌の outline と重なることがあるので box-shadow を使う (両方見えるように) */
+.drill-hand .drill-hand__aka { box-shadow: 0 0 0 2px #f44336, 0 0 7px rgba(244,67,54,0.75); }
 
 .drill-legend { font-size: 10px; color: #9ec; text-align: center; margin: 0 0 8px; line-height: 1.9; }
 .drill-legend[hidden] { display: none; }
@@ -125,6 +128,7 @@
 .drill-lg--win { outline: 2px solid #ff5722; color: #ff8a65; }
 .drill-lg--open { outline: 1px solid #ffb74d; color: #ffb74d; }
 .drill-lg--pair { outline: 1px solid #9ec; color: #9ec; }
+.drill-lg--aka { box-shadow: 0 0 0 2px #f44336; color: #ff8a80; }
 .drill-note-inline { color: #ffcc80; }
 .drill-cond { font-size: 14px; line-height: 1.7; margin: 0 0 8px; text-align: center; }
 .drill-cond b { color: #ffeb3b; }
