@@ -101,6 +101,51 @@ const koutsuCtx = (o) => ctx(Object.assign({ winTile: T(3) }, o));
       bad ? detail.join(' | ') : `${cases.length}ケース 一致`);
   }
 
+  console.log('\n── 四麻の北家 (ドリル用。三麻に北家は無い) ──────────');
+  {
+    // 北が自風なら 北の刻子は役牌1翻 / 北の雀頭ならピンフ不成立
+    const koutsu = calcYaku(koutsuHand(23), koutsuCtx({ seatWind: '北', round: '東1' }));
+    check('自風北の 北刻子 → 自風 北 が付く', names(koutsu).includes('自風 北'), names(koutsu).join('/'));
+
+    const pair = calcYaku(pinfuHand(23), pinfuCtx({ seatWind: '北', round: '東1' }));
+    check('自風北が 北を雀頭 → ピンフなし', !hasPinfu(pair), names(pair).join('/'));
+
+    // 三麻 (自風は東/南/西) では北は役牌にならない
+    const sanma = calcYaku(koutsuHand(23), koutsuCtx({ seatWind: '西', round: '東1' }));
+    check('自風西のとき 北刻子は役牌にならない',
+      !names(sanma).some(n => n.startsWith('自風') || n.startsWith('場風')), names(sanma).join('/'));
+  }
+
+  console.log('\n── ダブル役満 (十三面 / 純正九蓮) ────────────────');
+  {
+    // 国士十三面: 13種すべて1枚ずつ + あがり牌。 あがり牌を抜くと13種1枚ずつになる
+    const kokushi13 = [0, 1, 2, 10, 11, 19, 20, 21, 22, 23, 24, 25, 26].map(id => T(id));
+    const r13 = calcYaku([...kokushi13, T(26, 1)], ctx({ winTile: T(26, 1), isTsumo: true }));
+    check('国士十三面待ち → ダブル役満 (26翻)', names(r13).includes('国士無双十三面'),
+      names(r13).join('/') + ' / ' + r13.han + '翻');
+    check('国士十三面は 26翻', r13.han === 26, `${r13.han}翻`);
+
+    // 13面でない国士: 白を2枚持って 中の1種だけを待っていた形。
+    // あがり牌 (中) を抜くと 白が2枚残る = 13種1枚ずつ にならない
+    const waitChun = [0, 1, 2, 10, 11, 19, 20, 21, 22, 23, 24, 25].map(id => T(id));
+    const rk = calcYaku([...waitChun, T(24, 1), T(26)], ctx({ winTile: T(26), isTsumo: true }));
+    check('単騎待ちの国士は 13翻のまま', names(rk).includes('国士無双') && rk.han === 13,
+      names(rk).join('/') + ' / ' + rk.han + '翻');
+
+    // 純正九蓮 (筒子 1112345678999 + 任意の1枚)。 5p を足すと九面待ちの形
+    const chuuren = [...Tn(2, 3), T(3), T(4), T(5), T(6), T(7), T(8), T(9), ...Tn(10, 3)];
+    const rj = calcYaku([...chuuren, T(6, 1)], ctx({ winTile: T(6, 1), isTsumo: true }));
+    check('純正九蓮宝燈 → ダブル役満 (26翻)', names(rj).includes('純正九蓮宝燈'),
+      names(rj).join('/') + ' / ' + rj.han + '翻');
+    check('純正九蓮は 26翻', rj.han === 26, `${rj.han}翻`);
+
+    // 非純正の九蓮 (1112245678999 の形で 3p 待ち → あがると 111234567 8999)
+    const notJunsei = [...Tn(2, 3), T(3), T(3), T(5), T(6), T(7), T(8), T(9), ...Tn(10, 3)];
+    const rn = calcYaku([...notJunsei, T(4)], ctx({ winTile: T(4), isTsumo: true }));
+    check('純正でない九蓮は 13翻のまま',
+      names(rn).includes('九蓮宝燈') && rn.han === 13, names(rn).join('/') + ' / ' + rn.han + '翻');
+  }
+
   console.log('\n── 場風・自風の判定が1箇所に集約されている ──────────');
   {
     // 同じ判断が複数箇所に散ると必ずズレる (雀頭側だけ自風を見落としていた実例あり)。
@@ -109,10 +154,10 @@ const koutsuCtx = (o) => ctx(Object.assign({ winTile: T(3) }, o));
     const path = require('path');
     const src = fs.readFileSync(path.join(__dirname, '..', 'script.js'), 'utf8');
     // ヘルパー自身の定義以外に、風牌 id を直書きしたテーブルが残っていないか
-    const table = /\{\s*'東':\s*20,\s*'南':\s*21,\s*'西':\s*22\s*\}/g;
-    const hits = src.match(table) || [];
-    check('自風の id テーブルは seatWindIdOf の中だけ', hits.length === 1,
-      `${hits.length}箇所 (1箇所=ヘルパー定義のみ)`);
+    // (風の種類が増減しても効くよう '東': 20 の出現回数で見る)
+    const hits = (src.match(/'東':\s*20/g) || []).length;
+    check('自風の id テーブルは seatWindIdOf の中だけ', hits === 1,
+      `${hits}箇所 (1箇所=ヘルパー定義のみ)`);
 
     // 「東を場風と決め打つ」書き方が残っていないか
     const eastHardcode = /startsWith\('東'\)/g;

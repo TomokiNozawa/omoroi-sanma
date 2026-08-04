@@ -152,10 +152,13 @@ const names = (r) => r.yakuList.map(y => y.name);
     });
     check('他人どうしの鳴きは影響しない', isNagashiMangan('bottom') === true);
 
-    // 満貫の点数が引ける (支払い計算に使う行)
-    const row = g.SCORE_TABLE.find(r => /満貫/.test(r.label) && !/跳|倍/.test(r.label));
-    check('満貫の行を正しく引ける', !!row && row.koTsumoKo === 2000 && row.oyaTsumo === 4000,
-      row ? row.label : '(見つからず)');
+    // 流し満貫の支払いは 満貫のツモ。 点数計算は ScoreCalc に一本化済み (固定表は廃止)
+    const SC = require('../score.js');
+    const koT = SC.calcScore({ fu: 30, han: 5, isOya: false, isTsumo: true, players: 3 });
+    const oyaT = SC.calcScore({ fu: 30, han: 5, isOya: true, isTsumo: true, players: 3 });
+    check('満貫ツモの支払いを引ける (子: 親4000/子2000 / 親: 4000オール)',
+      koT.detail.fromOya === 4000 && koT.detail.fromKo === 2000 && oyaT.detail.fromKo === 4000,
+      `子ツモ 親${koT.detail.fromOya}/子${koT.detail.fromKo} / 親ツモ ${oyaT.detail.fromKo}`);
   }
 
   const ok = summary('v0.9.8 ルール精度 (三槓子 / 九種九牌 / 流し満貫)');

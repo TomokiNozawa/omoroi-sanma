@@ -223,6 +223,8 @@ function makeGame() {
     location: { search: '', href: '' },
     localStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
     matchMedia: () => ({ matches: false, addEventListener() {} }),
+    // 対局の点数計算は score.js (符計算エンジン) に委ねている
+    ScoreCalc: require('../score.js'),
   };
   ctx.window = ctx;
   ctx.globalThis = ctx;
@@ -240,7 +242,11 @@ function makeGame() {
     coachShapeOf: (typeof coachShapeOf === 'function' ? coachShapeOf : null),
     waitingIds: (typeof waitingIds === 'function' ? waitingIds : null),
     nextTileId: (typeof nextTileId === 'function' ? nextTileId : null),
-    SCORE_TABLE: (typeof SCORE_TABLE !== 'undefined' ? SCORE_TABLE : null) })`;
+    calcFuForWin: (typeof calcFuForWin === 'function' ? calcFuForWin : null),
+    applyWinScore: (typeof applyWinScore === 'function' ? applyWinScore : null),
+    waitCandidatesOf: (typeof waitCandidatesOf === 'function' ? waitCandidatesOf : null),
+    roundWindId: (typeof roundWindId === 'function' ? roundWindId : null),
+    seatWindIdOf: (typeof seatWindIdOf === 'function' ? seatWindIdOf : null) })`;
   const api = vm.runInContext(code, ctx, { filename: 'script.js' });
   return { ...api, ctx, dom };
 }

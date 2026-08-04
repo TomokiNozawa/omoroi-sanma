@@ -25,7 +25,6 @@ const TILE_NAME = {
 // ※ このアプリの牌は三麻仕様で萬子が 1m/9m しかないため、順子は筒子・索子のみ
 const SHUNTSU_STARTS = [2, 3, 4, 5, 6, 7, 8, 11, 12, 13, 14, 15, 16, 17];
 const ALL_TILE_IDS = Object.keys(TILE_IMG).map(Number);
-const WIND_NAMES = ['東', '南', '西'];
 
 const $ = (id) => document.getElementById(id);
 const rnd = (n) => Math.floor(Math.random() * n);
@@ -59,7 +58,8 @@ function genTehaiRaw(players) {
   const isMenzen = Math.random() < 0.72;          // 門前を多めに (符の変化が出やすい)
   const isTsumo = Math.random() < 0.5;
   const isOya = Math.random() < 0.35;
-  const seatWind = isOya ? '東' : pick(['南', '西']);
+  // 四麻は席が4つなので北家が出る (三麻は東/南/西のみ。 北は自風にならず北抜きで数える)
+  const seatWind = isOya ? '東' : pick(players === 4 ? ['南', '西', '北'] : ['南', '西']);
   const roundWind = '東';
 
   // 面子4つ: 順子と刻子を混ぜる (全部順子だとピンフ形ばかりになる)

@@ -478,9 +478,11 @@ function enumerateDecomps(hand) {
 function roundWindId(round) {
   return String(round || '').startsWith('南') ? 21 : 20;
 }
-// 自風牌の id: 東=20 / 南=21 / 西=22 (seatWind 未指定の旧呼び出しは 親=東 とみなす)
+// 自風牌の id: 東=20 / 南=21 / 西=22 / 北=23 (seatWind 未指定の旧呼び出しは 親=東 とみなす)
+// ※ 三麻は席が3つなので北家は存在しない (北は自風にならず、北抜きで別に数える)。
+//   北家が出るのは 四麻を扱う点数計算ドリルのみ
 function seatWindIdOf(context) {
-  return { '東': 20, '南': 21, '西': 22 }[context.seatWind || (context.isOya ? '東' : null)];
+  return { '東': 20, '南': 21, '西': 22, '北': 23 }[context.seatWind || (context.isOya ? '東' : null)];
 }
 
 // 雀頭が役牌か (これに当たると ピンフ不成立)
@@ -736,7 +738,16 @@ function countYakuhai(hand, context) {
 function checkYakuman(hand, context) {
   const ymList = [];
   const counts = countTiles(hand);
-  if (isKokushi(hand)) ymList.push({ name: '国士無双', han: 13 });
+  if (isKokushi(hand)) {
+    // 十三面待ち = あがり牌を除いた13枚が 13種すべて1枚ずつ (どれを引いても和了) → ダブル役満
+    let thirteen = false;
+    if (context.winTile) {
+      const c = { ...counts };
+      c[context.winTile.id] = (c[context.winTile.id] || 0) - 1;
+      thirteen = KOKUSHI_IDS.every(id => c[id] === 1);
+    }
+    ymList.push(thirteen ? { name: '国士無双十三面', han: 26 } : { name: '国士無双', han: 13 });
+  }
   // 四暗刻: 対子+刻子のみの形。 単騎待ち (あがり牌=雀頭) は ロンでも成立 + ダブル役満。
   //         単騎以外は ツモ限定 (ロンだと最後の刻子が明刻扱い)。 ポン/明槓があると不成立
   if (!(context.openMeldIds || []).length) {
@@ -781,7 +792,19 @@ function checkYakuman(hand, context) {
       if (c < need) { ok = false; break; }
       extra += c - need;
     }
-    if (ok && extra === 1) { ymList.push({ name: '九蓮宝燈', han: 13 }); break; }
+    if (ok && extra === 1) {
+      // 純正 (九面待ち) = あがり牌を除くと ちょうど 1112345678999 → ダブル役満
+      let junsei = false;
+      const w = context.winTile;
+      if (w && w.id >= base && w.id <= base + 8) {
+        const c = { ...counts };
+        c[w.id] = (c[w.id] || 0) - 1;
+        junsei = [0, 1, 2, 3, 4, 5, 6, 7, 8].every(n =>
+          (c[base + n] || 0) === ((n === 0 || n === 8) ? 3 : 1));
+      }
+      ymList.push(junsei ? { name: '純正九蓮宝燈', han: 26 } : { name: '九蓮宝燈', han: 13 });
+      break;
+    }
   }
   // 天和 (親の配牌ツモ) / 地和 (子の第一ツモ、 北抜き・打牌なし)
   if (context.firstDraw && context.isTsumo) {
@@ -967,6 +990,69 @@ function calcYaku(hand, context) {
   }
 
   return { yakuList, han, isYakuman: false };
+}
+
+// ─── 符の計算 (点数計算ドリルと同じ ScoreCalc に委ねる) ──────
+// あがり牌が その分解のどこに入るか = 待ちの形。 複数の解釈があり得るので全部返す
+function waitCandidatesOf(decomp, winId) {
+  const out = [];
+  if (decomp.pair === winId) out.push({ wait: 'tanki', ronMeldIdx: -1 });
+  decomp.melds.forEach((m, i) => {
+    if (m.type === 'kotsu') {
+      if (m.id === winId) out.push({ wait: 'shanpon', ronMeldIdx: i });
+      return;
+    }
+    const n = tileNum(m.id);            // 順子の最小数字 (1-7)
+    if (winId === m.id + 1) out.push({ wait: 'kanchan', ronMeldIdx: -1 });
+    else if (winId === m.id) out.push({ wait: n === 7 ? 'penchan' : 'ryanmen', ronMeldIdx: -1 });
+    else if (winId === m.id + 2) out.push({ wait: n === 1 ? 'penchan' : 'ryanmen', ronMeldIdx: -1 });
+  });
+  return out;
+}
+
+// あがり手の符。 分解と待ちの取り方が複数あるときは 符が最大になる解釈を選ぶ (高点法)。
+// ⚠️ 翻は calcYaku が高点法で決めているので、符もその翻と矛盾しない分解から選ぶ。
+//    ピンフが付いた手は「全順子 + 両面待ち」でしか成立しないので、その解釈に限定する
+//    (別分解で符だけ高く取ると、ピンフ1翻と符が食い違う)
+function calcFuForWin(hand, context, seat, result) {
+  if (typeof ScoreCalc === 'undefined') return 30;     // score.js 未読込時の保険
+  const yaku = (result && result.yakuList) || [];
+  const isChiitoi = yaku.some(y => y.name === '七対子');
+  const isPinfuWin = yaku.some(y => y.name === 'ピンフ');
+  const isMenzen = !(context.openMeldIds || []).length;
+  const roundWind = String(context.round || '東').charAt(0);
+  const common = { isTsumo: !!context.isTsumo, isMenzen,
+    seatWind: context.seatWind, roundWind };
+  if (isChiitoi) {
+    return ScoreCalc.calcFu(Object.assign({ melds: [], pair: null, wait: 'tanki',
+      isChiitoi: true, isPinfu: false }, common)).fu;
+  }
+  // 鳴きの種別 (ポン=明刻2符 / 明槓16符 / 暗槓32符 は符が大きく変わる)
+  const meldType = {};
+  for (const m of (G.melds[seat] || [])) meldType[m.id] = m.type;
+  const winId = context.winTile ? context.winTile.id : null;
+  let bestFu = 0;
+  for (const d of enumerateDecomps(hand)) {
+    if (isPinfuWin && d.melds.some(m => m.type !== 'shuntsu')) continue;
+    const melds = d.melds.map(m => {
+      if (m.type === 'shuntsu') return { type: 'shuntsu', id: m.id, open: false };
+      const mt = meldType[m.id];
+      if (mt === 'ankan') return { type: 'kantsu', id: m.id, open: false };
+      if (mt === 'minkan' || mt === 'kakan') return { type: 'kantsu', id: m.id, open: true };
+      return { type: 'koutsu', id: m.id, open: mt === 'pon' };
+    });
+    const cands = (winId != null) ? waitCandidatesOf(d, winId) : [];
+    if (!cands.length) cands.push({ wait: 'tanki', ronMeldIdx: -1 });
+    for (const c of cands) {
+      if (isPinfuWin && c.wait !== 'ryanmen') continue;
+      const fu = ScoreCalc.calcFu(Object.assign({
+        melds, pair: d.pair, wait: c.wait, isChiitoi: false,
+        isPinfu: isPinfuWin, ronMeldIdx: c.ronMeldIdx,
+      }, common)).fu;
+      if (fu > bestFu) bestFu = fu;
+    }
+  }
+  return bestFu || 30;
 }
 
 // 点数移動アニメーション: 各席のラベル付近に ±点数バッジを浮かせる
@@ -3153,12 +3239,13 @@ function endRound(reason) {
     const nagashiSeats = playingSeats.filter(s => isNagashiMangan(s));
     let payLabel;
     if (nagashiSeats.length > 0) {
-      const row = SCORE_TABLE.find(r => /満貫/.test(r.label) && !/跳|倍/.test(r.label));
       for (const w of nagashiSeats) {
         const isOya = (G.oya === w);
+        // 流し満貫は 満貫のツモと同じ支払い (満貫は符に依らないので fu は何でもよい)
+        const sc = ScoreCalc.calcScore({ fu: 30, han: 5, isOya, isTsumo: true, players: playingSeats.length });
         for (const p of playingSeats) {
           if (p === w) continue;
-          const pay = isOya ? row.oyaTsumo : (p === G.oya ? row.koTsumoOya : row.koTsumoKo);
+          const pay = isOya ? sc.detail.fromKo : (p === G.oya ? sc.detail.fromOya : sc.detail.fromKo);
           G.scores[p] -= pay; ryuDeltas[p] = (ryuDeltas[p] || 0) - pay;
           G.scores[w] += pay; ryuDeltas[w] = (ryuDeltas[w] || 0) + pay;
         }
@@ -3242,25 +3329,31 @@ function endRound(reason) {
 
 // ─── 勝利時の点数移動 (供託回収 + 本場加算込み) ─────
 // 戻り値: {seat: 増減} — 表示用
-function applyWinScore(seat, context, result) {
-  const row = SCORE_TABLE.find(r => r.match(result.han, result.isYakuman))
-    || SCORE_TABLE[SCORE_TABLE.length - 1];
+// fu を渡すと 符×翻 で計算する (実ルール)。 省略時は 30符扱い。
+// 役満は符に依らない固定点。 複数役満 (例: 字一色+大三元 = 26翻) は N個分払う
+function applyWinScore(seat, context, result, fu) {
   const isOya = (G.oya === seat);
   const playing = ALL_SEATS.filter(s => s !== G.emptySeat);
-  // 複数役満 (例: 字一色+大三元 = 26翻) は 役満N個分の支払い
   const ymMult = result.isYakuman ? Math.max(1, Math.round(result.han / 13)) : 1;
   const delta = {};
   playing.forEach(s => { delta[s] = 0; });
+  const sc = ScoreCalc.calcScore({
+    fu: fu || 30,
+    han: result.isYakuman ? 13 : result.han,   // 役満は 13翻扱い + ymMult 倍
+    isOya, isTsumo: !!context.isTsumo, players: playing.length,
+  });
   if (context.isTsumo) {
     for (const p of playing) {
       if (p === seat) continue;
-      const pay = (isOya ? row.oyaTsumo : (p === G.oya ? row.koTsumoOya : row.koTsumoKo)) * ymMult
-        + 100 * G.honba;
+      // 親のツモは 子が全員同額 (fromKo のみ) / 子のツモは 親だけ倍額
+      const each = isOya ? sc.detail.fromKo
+        : (p === G.oya ? sc.detail.fromOya : sc.detail.fromKo);
+      const pay = each * ymMult + 100 * G.honba;
       delta[p] -= pay;
       delta[seat] += pay;
     }
   } else if (context.fromSeat) {
-    const pay = (isOya ? row.oyaRon : row.koRon) * ymMult + 300 * G.honba;
+    const pay = sc.detail.fromLoser * ymMult + 300 * G.honba;
     delta[context.fromSeat] -= pay;
     delta[seat] += pay;
   }
@@ -3274,20 +3367,6 @@ function applyWinScore(seat, context, result) {
 }
 
 // ─── あがりモーダル (翻数表示) ─────────────────
-// 翻数 → 点数表 (4麻標準、 三麻も同じ表で簡略化、 30符固定)
-// rowHan: 表の翻区分 (1,2,3,'満貫','跳満','倍満','3倍満','役満')
-// matchHan(han, isYakuman): han が この行に属するか
-const SCORE_TABLE = [
-  { label: '1翻',           match: (h,y) => !y && h === 1,  oyaRon: 1500,  oyaTsumo: 500,  koRon: 1000,  koTsumoOya: 500,  koTsumoKo: 300 },
-  { label: '2翻',           match: (h,y) => !y && h === 2,  oyaRon: 2900,  oyaTsumo: 1000, koRon: 2000,  koTsumoOya: 1000, koTsumoKo: 500 },
-  { label: '3翻',           match: (h,y) => !y && h === 3,  oyaRon: 5800,  oyaTsumo: 2000, koRon: 3900,  koTsumoOya: 2000, koTsumoKo: 1000 },
-  { label: '4-5翻 (満貫)',  match: (h,y) => !y && (h === 4 || h === 5), oyaRon: 12000, oyaTsumo: 4000, koRon: 8000,  koTsumoOya: 4000,  koTsumoKo: 2000 },
-  { label: '6-7翻 (跳満)',  match: (h,y) => !y && (h === 6 || h === 7), oyaRon: 18000, oyaTsumo: 6000, koRon: 12000, koTsumoOya: 6000,  koTsumoKo: 3000 },
-  { label: '8-10翻 (倍満)', match: (h,y) => !y && (h >= 8 && h <= 10),  oyaRon: 24000, oyaTsumo: 8000, koRon: 16000, koTsumoOya: 8000,  koTsumoKo: 4000 },
-  { label: '11-12翻 (3倍満)', match: (h,y) => !y && (h === 11 || h === 12), oyaRon: 36000, oyaTsumo: 12000, koRon: 24000, koTsumoOya: 12000, koTsumoKo: 6000 },
-  { label: '13翻+ (役満)',  match: (h,y) => y || h >= 13,    oyaRon: 48000, oyaTsumo: 16000, koRon: 32000, koTsumoOya: 16000, koTsumoKo: 8000 },
-];
-
 function showWinModal(seat, hand, context, result) {
   const overlay = document.getElementById('end-overlay');
   const titleEl = document.getElementById('end-title');
@@ -3332,7 +3411,8 @@ function showWinModal(seat, hand, context, result) {
   // 点数移動 (現在の本場で計算) → その後 連荘/本場 更新
   const prevHonba = G.honba;
   const prevKyotaku = G.kyotaku;
-  const transfers = applyWinScore(seat, context, result);
+  const winFu = calcFuForWin(hand, context, seat, result);
+  const transfers = applyWinScore(seat, context, result, winFu);
   if (G.oya === seat) {
     G.honba++;
     G.lastResult = 'oyaWin';   // 親あがり = 連荘
@@ -3345,10 +3425,11 @@ function showWinModal(seat, hand, context, result) {
   const winType = context.isTsumo ? 'ツモ' : 'ロン';
   const tier = hanToTier(result.han, result.isYakuman);
   const isOya = (G.oya === seat);
-  titleEl.textContent = `🎉 ${whoLabel}の${winType}あがり! ${tier} (${result.isYakuman ? '役満' : result.han + '翻'})`;
-
-  // 該当翻数の row index
-  const hitRowIdx = SCORE_TABLE.findIndex(r => r.match(result.han, result.isYakuman));
+  // 役満は符に依らないので符を出さない。
+  // 4翻以下は tier が「N翻」そのものなので、「3翻 (40符 3翻)」と重複させない
+  const titleScore = result.isYakuman ? tier
+    : (result.han >= 5 ? `${tier} (${winFu}符 ${result.han}翻)` : `${winFu}符 ${result.han}翻`);
+  titleEl.textContent = `🎉 ${whoLabel}の${winType}あがり! ${titleScore}`;
 
   // タブUI (親/子)、 上がった人で デフォルト
   const defaultTab = isOya ? 'oya' : 'ko';
@@ -3430,9 +3511,30 @@ function showWinModal(seat, hand, context, result) {
   yakuHtml += result.yakuList.map(y => `${y.name}<small>(${y.han}翻)</small>`).join(' / ');
   yakuHtml += '</div>';
 
-  // 点数表 (タブ切替)
+  // 点数表 (タブ切替)。
+  // ⚠️ 符が違えば点数も変わるので、固定表ではなく「今回の符」で作る。
+  //    ここが固定表のままだと、表の数字と実際の支払いが食い違って見える
+  const tableRows = result.isYakuman ? [] : [
+    { label: '1翻', han: 1 }, { label: '2翻', han: 2 }, { label: '3翻', han: 3 },
+    { label: '4翻', han: 4 }, { label: '5翻 (満貫)', han: 5 },
+    { label: '6-7翻 (跳満)', han: 6 }, { label: '8-10翻 (倍満)', han: 8 },
+    { label: '11-12翻 (3倍満)', han: 11 }, { label: '13翻+ (役満)', han: 13 },
+  ];
+  const tableHitIdx = tableRows.findIndex(r =>
+    (r.han === 1 && result.han === 1) || (r.han === 2 && result.han === 2)
+    || (r.han === 3 && result.han === 3) || (r.han === 4 && result.han === 4)
+    || (r.han === 5 && result.han === 5) || (r.han === 6 && result.han >= 6 && result.han <= 7)
+    || (r.han === 8 && result.han >= 8 && result.han <= 10)
+    || (r.han === 11 && result.han >= 11 && result.han <= 12) || (r.han === 13 && result.han >= 13));
+  const playerCount = ALL_SEATS.filter(s => s !== G.emptySeat).length;
+  const cellsOf = (han, forOya) => {
+    const ron = ScoreCalc.calcScore({ fu: winFu, han, isOya: forOya, isTsumo: false, players: playerCount });
+    const tsu = ScoreCalc.calcScore({ fu: winFu, han, isOya: forOya, isTsumo: true, players: playerCount });
+    return { ron: ron.detail.fromLoser, tsumoEach: tsu.detail.fromKo, tsumoOya: tsu.detail.fromOya };
+  };
   function buildTable(tab) {
     let html = '<table style="width:100%; border-collapse:collapse; font-size:10px; margin-top:4px;">';
+    html += `<caption style="caption-side:top; font-size:10px; color:#9db; text-align:left; padding:2px 0;">${winFu}符の場合</caption>`;
     html += '<thead><tr>';
     html += '<th style="padding:3px 4px; background:#2d6b3f; color:#fff; text-align:left; border:1px solid #4a6;">翻数</th>';
     if (tab === 'oya') {
@@ -3443,8 +3545,8 @@ function showWinModal(seat, hand, context, result) {
       html += '<th style="padding:3px 4px; background:#2d6b3f; color:#fff; border:1px solid #4a6;">子ツモ<br><small>(親 / 子)</small></th>';
     }
     html += '</tr></thead><tbody>';
-    SCORE_TABLE.forEach((row, i) => {
-      const hit = (i === hitRowIdx);
+    tableRows.forEach((row, i) => {
+      const hit = (i === tableHitIdx);
       const rowStyle = hit ? 'background:#ffeb3b; color:#000; font-weight:bold;' : 'background:rgba(255,255,255,0.05); color:#ddd;';
       // 今回の点数セル: あがった人のタブ + 該当翻の行 + ロン/ツモの列 に 赤枠+📍
       const isWinnerTab = (tab === defaultTab);
@@ -3452,14 +3554,14 @@ function showWinModal(seat, hand, context, result) {
       const hiTsumo = (hit && isWinnerTab && context.isTsumo) ? ' outline:2px solid #f44336; outline-offset:-2px;' : '';
       const pinRon = hiRon ? '📍' : '';
       const pinTsumo = hiTsumo ? '📍' : '';
+      const c = cellsOf(row.han, tab === 'oya');
       html += `<tr style="${rowStyle}">`;
       html += `<td style="padding:3px 4px; border:1px solid #4a6;">${row.label}</td>`;
+      html += `<td style="padding:3px 4px; border:1px solid #4a6; text-align:right;${hiRon}">${pinRon}${c.ron.toLocaleString()}</td>`;
       if (tab === 'oya') {
-        html += `<td style="padding:3px 4px; border:1px solid #4a6; text-align:right;${hiRon}">${pinRon}${row.oyaRon.toLocaleString()}</td>`;
-        html += `<td style="padding:3px 4px; border:1px solid #4a6; text-align:right;${hiTsumo}">${pinTsumo}${row.oyaTsumo.toLocaleString()}</td>`;
+        html += `<td style="padding:3px 4px; border:1px solid #4a6; text-align:right;${hiTsumo}">${pinTsumo}${c.tsumoEach.toLocaleString()}</td>`;
       } else {
-        html += `<td style="padding:3px 4px; border:1px solid #4a6; text-align:right;${hiRon}">${pinRon}${row.koRon.toLocaleString()}</td>`;
-        html += `<td style="padding:3px 4px; border:1px solid #4a6; text-align:right;${hiTsumo}">${pinTsumo}${row.koTsumoOya.toLocaleString()} / ${row.koTsumoKo.toLocaleString()}</td>`;
+        html += `<td style="padding:3px 4px; border:1px solid #4a6; text-align:right;${hiTsumo}">${pinTsumo}${c.tsumoOya.toLocaleString()} / ${c.tsumoEach.toLocaleString()}</td>`;
       }
       html += '</tr>';
     });
@@ -3554,11 +3656,14 @@ function showDoubleRonModal(winners, fromSeat, tile) {
   // 点数移動: 1人目 (討ち取り順で上家) が 本場・供託を総取り、 2人目は素点のみ
   const totals = {};
   ALL_SEATS.forEach(s => { totals[s] = 0; });
-  const t1 = applyWinScore(winners[0].seat, { isTsumo: false, fromSeat }, winners[0].result);
+  // 符は各自の手から計算する (ロン牌 + 鳴き牌を足した形で見る)
+  const fuOf = (w) => calcFuForWin(
+    [...G.hands[w.seat], tile, ...meldTriples(w.seat)], w.ctx, w.seat, w.result);
+  const t1 = applyWinScore(winners[0].seat, { isTsumo: false, fromSeat }, winners[0].result, fuOf(winners[0]));
   Object.keys(t1).forEach(s => { totals[s] += t1[s]; });
   const savedHonba = G.honba;
   G.honba = 0;  // 2人目には本場を付けない (供託は1人目が回収済みで0)
-  const t2 = applyWinScore(winners[1].seat, { isTsumo: false, fromSeat }, winners[1].result);
+  const t2 = applyWinScore(winners[1].seat, { isTsumo: false, fromSeat }, winners[1].result, fuOf(winners[1]));
   G.honba = savedHonba;
   Object.keys(t2).forEach(s => { totals[s] += t2[s]; });
   // 連荘判定: 勝者に親が含まれれば連荘
