@@ -1015,6 +1015,17 @@ function waitCandidatesOf(decomp, winId) {
 //    ピンフが付いた手は「全順子 + 両面待ち」でしか成立しないので、その解釈に限定する
 //    (別分解で符だけ高く取ると、ピンフ1翻と符が食い違う)
 function calcFuForWin(hand, context, seat, result) {
+  // 鳴きの種別 (ポン=明刻2符 / 明槓16符 / 暗槓32符 は符が大きく変わる)
+  const meldType = {};
+  for (const m of (G.melds[seat] || [])) meldType[m.id] = m.type;
+  return calcFuBest(hand, context, meldType, result);
+}
+
+// 符の高点法本体。 鳴きの種別を meldType {id: 'pon'|'minkan'|'kakan'|'ankan'} で受ける。
+// ⚠️ 点数計算ドリルもこれを呼ぶ (drill.js)。 待ちの形を出題に出さない代わりに
+//    「出題の符が 高点法で最大の解釈か」を ここで突き合わせて確かめている。
+//    ドリル側に符の選び方を書き直すと 対局と食い違うので必ずこれを使うこと
+function calcFuBest(hand, context, meldType, result) {
   if (typeof ScoreCalc === 'undefined') return 30;     // score.js 未読込時の保険
   const yaku = (result && result.yakuList) || [];
   const isChiitoi = yaku.some(y => y.name === '七対子');
@@ -1027,9 +1038,6 @@ function calcFuForWin(hand, context, seat, result) {
     return ScoreCalc.calcFu(Object.assign({ melds: [], pair: null, wait: 'tanki',
       isChiitoi: true, isPinfu: false }, common)).fu;
   }
-  // 鳴きの種別 (ポン=明刻2符 / 明槓16符 / 暗槓32符 は符が大きく変わる)
-  const meldType = {};
-  for (const m of (G.melds[seat] || [])) meldType[m.id] = m.type;
   const winId = context.winTile ? context.winTile.id : null;
   let bestFu = 0;
   for (const d of enumerateDecomps(hand)) {

@@ -243,6 +243,7 @@ function makeGame() {
     waitingIds: (typeof waitingIds === 'function' ? waitingIds : null),
     nextTileId: (typeof nextTileId === 'function' ? nextTileId : null),
     calcFuForWin: (typeof calcFuForWin === 'function' ? calcFuForWin : null),
+    calcFuBest: (typeof calcFuBest === 'function' ? calcFuBest : null),
     applyWinScore: (typeof applyWinScore === 'function' ? applyWinScore : null),
     waitCandidatesOf: (typeof waitCandidatesOf === 'function' ? waitCandidatesOf : null),
     roundWindId: (typeof roundWindId === 'function' ? roundWindId : null),

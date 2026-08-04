@@ -38,13 +38,16 @@ function loadDrill() {
     calcYaku: ENGINE.calcYaku,
     TILE_IMG: ENGINE.TILE_IMG,
     RED_DORA_IDS: ENGINE.RED_DORA_IDS,   // 赤ドラ (5筒/5索) の id。 対局側の定義をそのまま使う
+    nextTileId: ENGINE.nextTileId,       // ドラ表示牌 → ドラ牌
+    calcFuBest: ENGINE.calcFuBest,       // 符の高点法 (待ちの形を出題に書かないための一意性チェック)
   };
   ctx.window = ctx;
   vm.createContext(ctx);
   const src = fs.readFileSync(path.join(__dirname, '..', 'drill.js'), 'utf8');
   return vm.runInContext(src + `
 ;({ genTehai, handTiles, scoreChoices, splitChoices, judgeHand, toYakuInput,
-    countAka, S, TILE_IMG, SHUNTSU_STARTS, RED_DORA_IDS })`,
+    countAka, indicatorFor, pickDoraId, isFuUnambiguous,
+    S, TILE_IMG, SHUNTSU_STARTS, RED_DORA_IDS })`,
     ctx, { filename: 'drill.js' });
 }
 
@@ -184,7 +187,7 @@ const D = loadDrill();
     // 出題では翻数も符も伏せる。 手牌+状況から翻が一意に決まらないと解けない問題になる。
     let noYaku = 0, yakuman = 0, outOfRange = 0, mismatch = 0, pinfuConflict = 0;
     let riichiWhenOpen = 0, doraTooMany = 0, hanSumBad = 0;
-    let sawRiichi = 0, sawDora = 0, hanSeen = new Set();
+    let sawNoDora = 0, sawDora = 0, hanSeen = new Set();
     for (let i = 0; i < 800; i++) {
       const t = D.genTehai(i % 2 ? 3 : 4);
       hanSeen.add(t.han);
@@ -196,17 +199,17 @@ const D = loadDrill();
       // 手役 + リーチ + ドラ の合計が han と一致するか
       const sum = t.yakuList.reduce((n, y) => n + y.han, 0);
       if (sum !== t.han) hanSumBad++;
-      // 副露手にリーチは付かない
-      if (t.isRiichi && !t.hand.isMenzen) riichiWhenOpen++;
+      // 出題に出すのは 場・自風・親子・ドラ牌・ツモロン・あがり牌 の6つだけなので、
+      // 手牌から読み取れないリーチは 出題しない (付いていたら解けない問題になる)
+      if (t.isRiichi) riichiWhenOpen++;
       if (t.doraCount < 0 || t.doraCount > 2) doraTooMany++;
-      if (t.isRiichi) sawRiichi++;
       if (t.doraCount > 0) sawDora++;
+      if (t.doraCount === 0) sawNoDora++;
 
-      // 手役だけを判定し直して、リーチ+ドラを引いた分と一致するか (= 手牌から読み取れる翻)
-      const bare = Object.assign({}, t.hand, { isRiichi: false });
-      const j = D.judgeHand(bare);
+      // 手役だけを判定し直して、ドラを引いた分と一致するか (= 手牌から読み取れる翻)
+      const j = D.judgeHand(t.hand);
       if (!j) { mismatch++; continue; }
-      const expect = j.han + (t.isRiichi ? 1 : 0) + t.doraCount;
+      const expect = j.han + t.doraCount;
       if (expect !== t.han) mismatch++;
       // 符計算(score.js)と役判定(calcYaku)でピンフの解釈が割れた手は出さない
       if (j.isPinfu !== t.hand.isPinfu) pinfuConflict++;
@@ -218,10 +221,10 @@ const D = loadDrill();
     check('役の内訳の合計が翻数と一致する', hanSumBad === 0, `不一致=${hanSumBad}件`);
     check('手牌から読み取れる翻数と出題の翻数が一致する', mismatch === 0, `不一致=${mismatch}件`);
     check('ピンフの解釈が符計算と役判定で食い違わない', pinfuConflict === 0, `食い違い=${pinfuConflict}件`);
-    check('副露手にリーチが付かない', riichiWhenOpen === 0, `${riichiWhenOpen}件`);
+    check('リーチ手を出題しない (手牌から読み取れないため)', riichiWhenOpen === 0, `${riichiWhenOpen}件`);
     check('ドラは0〜2枚', doraTooMany === 0, `範囲外=${doraTooMany}件`);
-    check('リーチもドラも実際に出題される', sawRiichi > 0 && sawDora > 0,
-      `リーチ${sawRiichi}回 / ドラ${sawDora}回`);
+    check('ドラ有りの手も ドラ0枚の手も出題される', sawDora > 0 && sawNoDora > 0,
+      `ドラ有り${sawDora}回 / ドラ0枚${sawNoDora}回`);
   }
 
   console.log('\n── 赤ドラ (5筒・5索は全て赤) ────────────────');
@@ -272,6 +275,60 @@ const D = loadDrill();
       akaBad ? `不一致=${akaBad}件 (例: ${badCase})` : '1000問すべて一致');
     check('出題の akaCount が実際の枚数と一致する', akaCountBad === 0, `不一致=${akaCountBad}件`);
     check('赤ドラ入りの手が実際に出題される', sawAka > 0, `${sawAka}/1000問`);
+  }
+
+  console.log('\n── ドラは牌で出す (枚数は自分で数える) ──────────');
+  {
+    // 出題に出す情報は 場・自風・親子・ドラ牌・ツモロン・あがり牌 の6つだけ。
+    // ドラは枚数ではなく「何がドラか」を出すので、手牌のドラ枚数と役のドラ翻が
+    // ずれていると 数えた人が不正解になる。
+    let noDoraId = 0, badCount = 0, badCase = null, indBad = 0;
+    for (let i = 0; i < 1000; i++) {
+      const t = D.genTehai(i % 2 ? 3 : 4);
+      if (t.doraId == null || !D.TILE_IMG[t.doraId]) { noDoraId++; continue; }
+      const inHand = D.handTiles(t.hand).filter(id => id === t.doraId).length;
+      const listed = (t.yakuList.find(y => y.name === 'ドラ') || { han: 0 }).han;
+      if (inHand !== listed || inHand !== t.doraCount) {
+        badCount++;
+        if (!badCase) badCase = `手牌${inHand}枚 / 役${listed}翻 / doraCount${t.doraCount}`;
+      }
+    }
+    check('全ての出題に ドラ牌が入っている', noDoraId === 0, `欠落=${noDoraId}件`);
+    check('手牌のドラ枚数と 役のドラ翻が一致する', badCount === 0,
+      badCount ? `不一致=${badCount}件 (例: ${badCase})` : '1000問すべて一致');
+
+    // ドラ表示牌 → ドラ牌 の逆引き (三麻は 1萬⇔9萬 が隣同士なので自前実装は事故る)
+    for (const id of Object.keys(D.TILE_IMG).map(Number)) {
+      const ind = D.indicatorFor(id);
+      if (!ind || ENGINE.nextTileId(ind.id) !== id) indBad++;
+    }
+    check('ドラ牌から表示牌を逆引きできる (全27種)', indBad === 0, `不正=${indBad}件`);
+  }
+
+  console.log('\n── 待ちの形を出さないので 符が一意でないと出題しない ────');
+  {
+    // 待ちの形 (両面/嵌張/単騎…) を出題文から外したので、同じ牌姿でも
+    // 別の分解・別の待ちの取り方で符がもっと高くなる手は出題してはいけない。
+    // (高点法で正しく数えた人の答えが「不正解」になるため)
+    let ambiguous = 0, ambCase = null;
+    for (let i = 0; i < 600; i++) {
+      const t = D.genTehai(i % 2 ? 3 : 4);
+      const fuFixed = SC.calcFu(t.hand).fu;
+      const inp = D.toYakuInput(t.hand, D.indicatorFor(t.doraId));
+      const meldType = {};
+      for (const m of t.hand.melds) {
+        if (m.type === 'kantsu') meldType[m.id] = m.open ? 'minkan' : 'ankan';
+        else if (m.type === 'koutsu' && m.open) meldType[m.id] = 'pon';
+      }
+      const best = ENGINE.calcFuBest(inp.tiles, inp.context, meldType,
+        { yakuList: t.yakuList });
+      if (best !== fuFixed) {
+        ambiguous++;
+        if (!ambCase) ambCase = `出題${fuFixed}符 / 高点法${best}符 (${t.hand.wait})`;
+      }
+    }
+    check('出題の符が 高点法で最大の解釈になっている', ambiguous === 0,
+      ambiguous ? `${ambiguous}件 (例: ${ambCase})` : '600問すべて一致');
   }
 
   console.log('\n── 鳴いた面子の渡し方 (四麻のチー) ──────────────');

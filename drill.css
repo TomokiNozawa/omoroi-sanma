@@ -131,6 +131,11 @@
 .drill-lg--aka { box-shadow: 0 0 0 2px #f44336; color: #ff8a80; }
 .drill-note-inline { color: #ffcc80; }
 .drill-cond { font-size: 14px; line-height: 1.7; margin: 0 0 8px; text-align: center; }
+/* 状況文に混ぜるドラ牌。 何がドラかだけ示し、枚数は自分で数えてもらう */
+.drill-cond__tile {
+  width: 20px; height: auto; aspect-ratio: 3 / 4; border-radius: 2px;
+  vertical-align: -5px; margin: 0 3px;
+}
 .drill-cond b { color: #ffeb3b; }
 .drill-ask { font-size: 15px; font-weight: 700; margin: 0; text-align: center; color: #aee5c8; }
 
